@@ -1,0 +1,12 @@
+{
+  "name": "reelstack",
+  "private": true,
+  "type": "module",
+  "workspaces": ["client"],
+  "scripts": {
+    "dev": "npm run dev -w client",
+    "build": "npm run build -w client",
+    "lint": "npm run lint -w client"
+  },
+  "engines": { "node": ">=24" }
+}
