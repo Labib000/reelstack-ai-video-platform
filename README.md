@@ -2,8 +2,6 @@
 
 A video streaming platform with adaptive HLS playback, JWT auth with refresh-token rotation, and **Ask the Video**: ask questions about a video and get answers that link to the exact timestamp.
 
-See [PLAN.md](PLAN.md) for the full roadmap.
-
 ## Stack
 - **Client:** React + TypeScript + Vite + Tailwind CSS
 - **Server:** Node.js + Express 5 + TypeScript + MongoDB + Redis (BullMQ + FFmpeg worker planned)
