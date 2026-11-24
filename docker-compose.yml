@@ -1,0 +1,61 @@
+# Local infrastructure for development and tests.
+#   npm run infra:up     start mongo, redis and minio (waits for healthchecks)
+#   npm run infra:down   stop them (named volumes keep the data)
+# MinIO console: http://localhost:9001 (minioadmin / minioadmin)
+name: reelstack
+
+services:
+    mongo:
+        image: mongo:8
+        ports: ['127.0.0.1:27017:27017']
+        volumes: ['mongo-data:/data/db']
+        healthcheck:
+            test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.adminCommand("ping").ok']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    redis:
+        image: redis:7-alpine
+        ports: ['127.0.0.1:6379:6379']
+        # BullMQ needs noeviction so queued jobs are never dropped.
+        command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+        volumes: ['redis-data:/data']
+        healthcheck:
+            test: ['CMD', 'redis-cli', 'ping']
+            interval: 5s
+            timeout: 3s
+            retries: 5
+
+    minio:
+        image: minio/minio:latest
+        command: ['server', '/data', '--console-address', ':9001']
+        environment:
+            MINIO_ROOT_USER: minioadmin
+            MINIO_ROOT_PASSWORD: minioadmin
+        ports: ['127.0.0.1:9000:9000', '127.0.0.1:9001:9001']
+        volumes: ['minio-data:/data']
+        healthcheck:
+            test: ['CMD', 'mc', 'ready', 'local']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    # One-shot: creates the bucket and lets the browser PUT upload parts to it.
+    minio-init:
+        image: minio/mc:latest
+        depends_on:
+            minio:
+                condition: service_healthy
+        entrypoint: >
+            /bin/sh -c "
+            mc alias set local http://minio:9000 minioadmin minioadmin &&
+            mc mb --ignore-existing local/reelstack &&
+            echo 'bucket ready'
+            "
+        restart: 'no'
+
+volumes:
+    mongo-data:
+    redis-data:
+    minio-data:
