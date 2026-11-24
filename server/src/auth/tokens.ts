@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import type { Role } from '@reelstack/shared';
+import { type Role, roleSchema } from '@reelstack/shared';
 import jwt from 'jsonwebtoken';
 
 const ISSUER = 'reelstack';
@@ -42,13 +42,13 @@ export function verifyAccessToken(token: string, secret: string): AccessClaims {
     if (
         typeof payload === 'string' ||
         typeof payload.sub !== 'string' ||
-        (payload.role !== 'user' && payload.role !== 'admin') ||
+        !roleSchema.safeParse(payload.role).success ||
         typeof payload.tv !== 'number'
     ) {
         throw new Error('Malformed access token');
     }
 
-    return { sub: payload.sub, role: payload.role, tv: payload.tv };
+    return { sub: payload.sub, role: payload.role as Role, tv: payload.tv };
 }
 
 /** 32 random bytes: an opaque refresh token (not a JWT, nothing to decode). */

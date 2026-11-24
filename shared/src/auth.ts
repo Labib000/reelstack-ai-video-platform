@@ -20,7 +20,13 @@ export const loginSchema = z.object({
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
-export const roleSchema = z.enum(['user', 'admin']);
+/**
+ * user: watches, uploads, comments; manages only their own content.
+ * moderator: also removes any video or comment and hides users' content.
+ * admin: everything, including bans and changing roles.
+ */
+export const ROLES = ['user', 'moderator', 'admin'] as const;
+export const roleSchema = z.enum(ROLES);
 export type Role = z.infer<typeof roleSchema>;
 
 /** The user as the API returns it (never includes the password hash). */

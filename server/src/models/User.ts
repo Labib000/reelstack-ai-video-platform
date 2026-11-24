@@ -1,4 +1,4 @@
-import type { Role, UserDTO } from '@reelstack/shared';
+import { ROLES, type Role, type UserDTO } from '@reelstack/shared';
 import { type InferSchemaType, Schema, type Types, model } from 'mongoose';
 
 const userSchema = new Schema(
@@ -15,7 +15,7 @@ const userSchema = new Schema(
         passwordHash: { type: String, required: true, select: false },
         role: {
             type: String,
-            enum: ['user', 'admin'] satisfies Role[],
+            enum: ROLES,
             default: 'user',
         },
         avatarUrl: { type: String, default: null },

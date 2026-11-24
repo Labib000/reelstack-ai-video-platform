@@ -2,19 +2,26 @@
   "name": "reelstack",
   "private": true,
   "type": "module",
-  "workspaces": ["shared", "server", "client"],
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
   "scripts": {
     "dev": "npm run build -w shared && concurrently -k -n shared,server,client -c gray,cyan,magenta \"npm run dev -w shared\" \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
-    "test": "npm run build -w shared && npm run test -w server",
+    "test": "npm run build -w shared && npm run test -w server && npm run test -w client",
     "typecheck": "npm run build -w shared && npm run typecheck -w server",
     "lint": "npm run lint -w client",
     "infra:up": "docker compose up -d --wait",
-    "infra:down": "docker compose down"
+    "infra:down": "docker compose down",
+    "user:role": "npm run build -w shared && npm run user:role -w server --"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
     "typescript": "^5.9.3"
   },
-  "engines": { "node": ">=24" }
+  "engines": {
+    "node": ">=24"
+  }
 }

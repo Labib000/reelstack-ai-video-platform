@@ -8,7 +8,8 @@
     "start": "node --env-file-if-exists=../.env dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "user:role": "tsx --env-file-if-exists=../.env src/cli/setRole.ts"
   },
   "dependencies": {
     "@reelstack/shared": "*",

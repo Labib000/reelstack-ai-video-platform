@@ -1,4 +1,4 @@
-import type { ApiErrorBody } from '@reelstack/shared';
+import type { ApiErrorBody, Role } from '@reelstack/shared';
 import type { RequestHandler, Response } from 'express';
 import { isValidObjectId } from 'mongoose';
 
@@ -48,7 +48,9 @@ export function requireAuth(
             return;
         }
 
-        req.user = { id: claims.sub, role: user.role as 'user' | 'admin' };
+        // The role comes from the database, not the token, so a promotion or
+        // demotion applies on the very next request.
+        req.user = { id: claims.sub, role: user.role as Role };
         next();
     };
 }
