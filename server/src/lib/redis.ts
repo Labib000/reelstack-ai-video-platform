@@ -17,9 +17,11 @@ const MAX_RECONNECT_DELAY_MS = 5_000;
 const ERROR_LOG_INTERVAL_MS = 60_000;
 
 let client: Redis | null = null;
+let log: Logger | undefined;
 
 export function connectRedis(url: string, logger?: Logger): Redis {
     if (client) client.disconnect();
+    log = logger;
 
     const redis = new Redis(url, {
         lazyConnect: true,
@@ -90,4 +92,34 @@ export async function redisStatus(): Promise<RedisStatus> {
     } catch {
         return 'down';
     }
+}
+
+/**
+ * Runs one Redis call for a store (`op` names it, e.g. "rateLimit.get";
+ * Phase 6 will time it for Prometheus). Rethrows failures so the store can
+ * fall back to Mongo.
+ */
+export async function withRedis<T>(
+    _op: string,
+    call: (redis: Redis) => Promise<T>,
+): Promise<T> {
+    const redis = client;
+    if (!redis) throw new Error('Redis is not configured');
+    return call(redis);
+}
+
+/** When each store last logged a fallback, to log at most once a minute. */
+const warnedAt = new Map<string, number>();
+
+/** A store is using Mongo for one call because Redis failed: log it, rate-limited. */
+export function redisFallback(store: string, error: unknown): void {
+    const now = Date.now();
+    if (now - (warnedAt.get(store) ?? 0) < ERROR_LOG_INTERVAL_MS) return;
+
+    warnedAt.set(store, now);
+    const err = error as (Error & { code?: string }) | undefined;
+    log?.warn(
+        { store, err: err?.message || err?.code || String(error) },
+        'Redis failed; using Mongo',
+    );
 }

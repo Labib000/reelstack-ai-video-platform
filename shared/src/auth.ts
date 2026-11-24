@@ -40,3 +40,14 @@ export const authResponseSchema = z.object({
     user: userDtoSchema,
 });
 export type AuthResponse = z.infer<typeof authResponseSchema>;
+
+/** One signed-in device: a refresh-token family. */
+export const sessionDtoSchema = z.object({
+    familyId: z.string(),
+    userAgent: z.string().nullable(),
+    ip: z.string().nullable(),
+    createdAt: z.string(),
+    lastUsedAt: z.string(),
+    current: z.boolean(),
+});
+export type SessionDTO = z.infer<typeof sessionDtoSchema>;

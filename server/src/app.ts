@@ -2,10 +2,13 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import helmet from 'helmet';
 
+import type { Config } from './config.js';
 import type { Logger } from './lib/logger.js';
+import { apiNotFound, errorHandler } from './middleware/errors.js';
+import { createAuthRouter } from './routes/auth.js';
 import { healthRouter } from './routes/health.js';
 
-export function createApp(logger: Logger) {
+export function createApp(config: Config, logger: Logger) {
     const app = express();
 
     app.disable('x-powered-by');
@@ -15,22 +18,10 @@ export function createApp(logger: Logger) {
     app.use(cookieParser());
 
     app.use('/api/health', healthRouter);
+    app.use('/api/auth', createAuthRouter(config, logger));
 
-    app.use('/api', (_req, res) => {
-        res.status(404).json({ error: 'Not found' });
-    });
-
-    app.use(
-        (
-            err: unknown,
-            _req: express.Request,
-            res: express.Response,
-            _next: express.NextFunction,
-        ) => {
-            logger.error({ err }, 'Unhandled error');
-            res.status(500).json({ error: 'Internal server error' });
-        },
-    );
+    app.use('/api', apiNotFound);
+    app.use(errorHandler(logger));
 
     return app;
 }

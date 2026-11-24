@@ -10,7 +10,7 @@ const logger = createLogger(config);
 if (config.REDIS_URL) connectRedis(config.REDIS_URL, logger);
 await connectMongo(config.MONGO_URI, logger);
 
-const server = createApp(logger).listen(config.PORT, () => {
+const server = createApp(config, logger).listen(config.PORT, () => {
     logger.info(`API listening on http://localhost:${config.PORT}`);
 });
 

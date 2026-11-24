@@ -8,3 +8,6 @@ coverage/
 logs/
 *.log
 .DS_Store
+
+# Local planning notes (not published)
+PLAN.md

@@ -18,7 +18,7 @@ client/   React + Vite + Tailwind
 ```bash
 npm install
 cp .env.example .env    # then set JWT_ACCESS_SECRET
-npm run infra:up        # mongo, redis, minio (Docker)
+npm run infra:up        # mongo, mongo-express, redis, rustfs (Docker)
 npm run dev             # client http://localhost:5173, API http://localhost:4000
 curl localhost:4000/api/health
 npm test

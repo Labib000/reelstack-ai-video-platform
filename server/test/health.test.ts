@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import { createLogger } from '../src/lib/logger.js';
+import { testConfig } from './support/app.js';
 
-const app = createApp(createLogger({ NODE_ENV: 'test', LOG_LEVEL: undefined }));
+// No mongoose.connect here on purpose: health must report Mongo as down.
+const config = testConfig();
+const app = createApp(config, createLogger(config));
 
 describe('GET /api/health', () => {
     it('reports mongo down and redis disabled when nothing is connected', async () => {
@@ -20,5 +23,6 @@ describe('GET /api/health', () => {
     it('returns JSON 404 for unknown API routes', async () => {
         const res = await request(app).get('/api/nope');
         expect(res.status).toBe(404);
+        expect(res.body).toEqual({ message: 'Not found.' });
     });
 });

@@ -1,7 +1,7 @@
 # Local infrastructure for development and tests.
-#   npm run infra:up     start mongo, redis and minio (waits for healthchecks)
+#   npm run infra:up     start mongo, mongo-express, redis and rustfs (waits for healthchecks)
 #   npm run infra:down   stop them (named volumes keep the data)
-# MinIO console: http://localhost:9001 (minioadmin / minioadmin)
+# mongo-express: http://localhost:8081   RustFS console: http://localhost:9001/rustfs/console/
 name: reelstack
 
 services:
@@ -15,6 +15,20 @@ services:
             timeout: 5s
             retries: 10
 
+    # Web UI to browse the database: http://localhost:8081
+    # Login comes from MONGO_EXPRESS_USER / MONGO_EXPRESS_PASSWORD in .env.
+    mongo-express:
+        image: mongo-express:latest
+        depends_on:
+            mongo:
+                condition: service_healthy
+        ports: ['127.0.0.1:8081:8081']
+        environment:
+            ME_CONFIG_MONGODB_URL: mongodb://mongo:27017/
+            ME_CONFIG_BASICAUTH: 'true'
+            ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER:-admin}
+            ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-reelstack}
+
     redis:
         image: redis:7-alpine
         ports: ['127.0.0.1:6379:6379']
@@ -27,35 +41,46 @@ services:
             timeout: 3s
             retries: 5
 
-    minio:
-        image: minio/minio:latest
-        command: ['server', '/data', '--console-address', ':9001']
+    # S3-compatible object storage (stands in for Cloudflare R2 locally).
+    # MinIO no longer publishes free images, so this is RustFS (Apache-2.0).
+    # Console: http://localhost:9001/rustfs/console/, login = S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY.
+    rustfs:
+        image: rustfs/rustfs:latest
         environment:
-            MINIO_ROOT_USER: minioadmin
-            MINIO_ROOT_PASSWORD: minioadmin
+            RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-rustfsadmin}
+            RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
+            RUSTFS_CONSOLE_ENABLE: 'true'
         ports: ['127.0.0.1:9000:9000', '127.0.0.1:9001:9001']
-        volumes: ['minio-data:/data']
+        volumes: ['rustfs-data:/data']
         healthcheck:
-            test: ['CMD', 'mc', 'ready', 'local']
+            test: ['CMD', 'curl', '-fs', 'http://localhost:9000/health']
             interval: 5s
             timeout: 5s
             retries: 10
 
-    # One-shot: creates the bucket and lets the browser PUT upload parts to it.
-    minio-init:
-        image: minio/mc:latest
+    # One-shot: creates the bucket with a SigV4-signed S3 PUT (curl can sign
+    # S3 requests itself, so no extra CLI image is needed). 409 = already there.
+    storage-init:
+        image: rustfs/rustfs:latest
         depends_on:
-            minio:
+            rustfs:
                 condition: service_healthy
-        entrypoint: >
-            /bin/sh -c "
-            mc alias set local http://minio:9000 minioadmin minioadmin &&
-            mc mb --ignore-existing local/reelstack &&
-            echo 'bucket ready'
-            "
+        entrypoint: ['/bin/sh', '-c']
+        command:
+            - >
+              code=$$(curl -s -o /dev/null -w '%{http_code}' -X PUT
+              --aws-sigv4 'aws:amz:us-east-1:s3'
+              --user "$$KEY:$$SECRET"
+              "http://rustfs:9000/$$BUCKET");
+              echo "create bucket $$BUCKET: HTTP $$code";
+              [ "$$code" = 200 ] || [ "$$code" = 409 ]
+        environment:
+            KEY: ${S3_ACCESS_KEY_ID:-rustfsadmin}
+            SECRET: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
+            BUCKET: ${S3_BUCKET:-reelstack}
         restart: 'no'
 
 volumes:
     mongo-data:
     redis-data:
-    minio-data:
+    rustfs-data:

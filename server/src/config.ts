@@ -12,9 +12,16 @@ const envSchema = z.object({
         .default('development'),
     PORT: z.coerce.number().int().positive().default(4000),
     APP_URL: z.url().default('http://localhost:5173'),
-    LOG_LEVEL: z
-        .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
-        .optional(),
+    // `LOG_LEVEL=` (blank, as in .env.example) means unset.
+    LOG_LEVEL: z.preprocess(
+        (value) =>
+            typeof value === 'string' && value.trim() === ''
+                ? undefined
+                : value,
+        z
+            .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
+            .optional(),
+    ),
 
     MONGO_URI: z
         .string()
