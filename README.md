@@ -32,7 +32,6 @@ A long-form video platform built with the MERN stack and TypeScript. It has adap
 - [Project layout](#project-layout)
 - [Testing](#testing)
 - [Roadmap](#roadmap)
-- [Git hooks](#git-hooks)
 
 ---
 
@@ -97,7 +96,7 @@ See the [Roadmap](#roadmap) for details.
 | **AI** *(planned)* | Groq Whisper (transcripts), local bge-small embeddings, Groq LLM for answers |
 | **Monitoring** *(planned)* | prom-client → Prometheus → Grafana |
 | **Testing** | Vitest, Supertest, mongodb-memory-server |
-| **Tooling** | npm workspaces, Docker Compose, oxlint, git hooks |
+| **Tooling** | npm workspaces, Docker Compose, oxlint |
 
 ---
 
@@ -322,8 +321,7 @@ reelstack/
 │       ├── api/            axios client with refresh handling
 │       ├── data/           placeholder catalogue (replaced by the API later)
 │       └── hooks/          library store, appearance, debounce
-├── docker-compose.yml      mongo · mongo-express · redis · rustfs · storage-init
-└── .githooks/              pre-commit · commit-msg
+└── docker-compose.yml      mongo · mongo-express · redis · rustfs · storage-init
 ```
 
 ---
@@ -350,7 +348,7 @@ npm run test -w client         # client: refresh handling, forms, password scori
 
 | Phase | Scope | Status |
 |---|---|---|
-| 0 | Monorepo, Docker infra, git hooks | ✅ Done |
+| 0 | Monorepo, Docker infra | ✅ Done |
 | 1 | JWT auth, refresh rotation, sessions, roles, rate limits, 3-step signup | ✅ Done |
 | — | Client UI: shell, home, watch, library, auth screens | ✅ Done (placeholder data) |
 | 2 | Upload pipeline: S3 multipart direct to RustFS / R2 with presigned URLs | ⏳ Next |
@@ -359,17 +357,3 @@ npm run test -w client         # client: refresh handling, forms, password scori
 | 5 | **Ask the Video:** Whisper transcripts → embeddings → hybrid retrieval → cited answers; moment search | 🗓 Planned |
 | 6 | **Prometheus + Grafana**, k6 load tests, GitHub Actions CI, deploy (API + worker on Render/Fly, client on Vercel, R2, Atlas, managed Redis) | 🗓 Planned |
 
----
-
-## Git hooks
-
-Hooks live in `.githooks/`. Enable them once after cloning:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-| Hook | Checks |
-|---|---|
-| `pre-commit` | The commit's author and committer identity |
-| `commit-msg` | Rejects co-author trailers and tool-attribution lines |

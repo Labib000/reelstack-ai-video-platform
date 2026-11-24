@@ -1,8 +1,0 @@
-#!/bin/sh
-# Rejects commits whose author or committer identity is not the repo owner's.
-for who in "$(git var GIT_AUTHOR_IDENT)" "$(git var GIT_COMMITTER_IDENT)"; do
-    if echo "$who" | grep -qiE 'claude|anthropic'; then
-        echo "pre-commit: identity not allowed: $who" >&2
-        exit 1
-    fi
-done

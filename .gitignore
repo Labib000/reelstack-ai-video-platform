@@ -11,3 +11,6 @@ logs/
 
 # Local planning notes (not published)
 PLAN.md
+
+# Local git hooks (not published)
+.githooks/
