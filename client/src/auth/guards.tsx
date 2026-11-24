@@ -1,12 +1,14 @@
+import { type Permission, can } from '@reelstack/shared'
 import { Navigate, Outlet, useLocation, useSearchParams } from 'react-router-dom'
 
-import { safeNext } from '../lib/safeNext.ts'
-import { useAuth } from './context.ts'
+import { Spinner } from '@/components/ui/spinner'
+import { safeNext } from '@/lib/safeNext'
+import { useAuth } from './context'
 
 function FullPageSpinner() {
   return (
-    <div className="flex justify-center py-24" role="status" aria-label="Loading">
-      <span className="size-6 animate-spin rounded-full border-2 border-neutral-700 border-t-red-500" />
+    <div className="flex justify-center py-24 text-muted-foreground" role="status" aria-label="Loading">
+      <Spinner className="size-6" />
     </div>
   )
 }
@@ -35,4 +37,16 @@ export function RequireGuest() {
   if (status === 'loading') return <FullPageSpinner />
   if (status === 'authenticated') return <Navigate to={safeNext(params.get('next'))} replace />
   return <Outlet />
+}
+
+/** Signed-in users whose role grants `permission`; others see a 404. */
+export function RequirePermission({ permission, fallback }: { permission: Permission; fallback: React.ReactNode }) {
+  const { status, user } = useAuth()
+  const location = useLocation()
+
+  if (status === 'loading') return <FullPageSpinner />
+  if (status === 'guest') {
+    return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />
+  }
+  return can(user?.role, permission) ? <Outlet /> : fallback
 }

@@ -2,9 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ReelStack</title>
+    <title>ReelStack: ask any video</title>
+    <meta name="description" content="Watch long-form videos and ask them questions. Answers link to the exact moment." />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#09090b" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ReelStack" />
+    <meta property="og:title" content="ReelStack: ask any video" />
+    <meta property="og:description" content="Watch long-form videos and ask them questions. Answers link to the exact moment." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Apply the theme before first paint (dark unless the user chose otherwise).
+      (function () {
+        var a = 'dark'
+        try { a = localStorage.getItem('appearance') || 'dark' } catch (e) {}
+        var dark = a === 'dark' || (a === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

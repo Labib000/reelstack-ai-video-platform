@@ -2,6 +2,8 @@ import {
     type AuthResponse,
     loginSchema,
     registerSchema,
+    type UsernameAvailability,
+    usernameSchema,
 } from '@reelstack/shared';
 import { type Request, type Response, Router } from 'express';
 
@@ -38,8 +40,17 @@ function clientContext(req: Request): ClientContext {
     };
 }
 
-const isDuplicateKey = (error: unknown) =>
-    (error as { code?: number } | null)?.code === 11000;
+/** The unique field a duplicate-key error is about (`email` / `username`), or null. */
+function duplicateField(error: unknown): string | null {
+    const e = error as { code?: number; keyPattern?: Record<string, unknown> } | null;
+    if (e?.code !== 11000) return null;
+    return Object.keys(e.keyPattern ?? {})[0] ?? 'email';
+}
+
+const TAKEN: Record<string, string> = {
+    email: 'An account with this email already exists.',
+    username: 'That username is taken.',
+};
 
 export function createAuthRouter(config: Config, logger: Logger): Router {
     const router = Router();
@@ -70,13 +81,15 @@ export function createAuthRouter(config: Config, logger: Logger): Router {
             const input = parseOr422(registerSchema, req.body, res);
             if (!input) return;
 
-            const emailTaken = () =>
+            const [emailUsed, usernameUsed] = await Promise.all([
+                User.exists({ email: input.email }),
+                User.exists({ username: input.username }),
+            ]);
+            if (emailUsed || usernameUsed) {
                 sendValidationErrors(res, {
-                    email: 'An account with this email already exists.',
+                    ...(emailUsed && { email: TAKEN.email! }),
+                    ...(usernameUsed && { username: TAKEN.username! }),
                 });
-
-            if (await User.exists({ email: input.email })) {
-                emailTaken();
                 return;
             }
 
@@ -84,13 +97,19 @@ export function createAuthRouter(config: Config, logger: Logger): Router {
             try {
                 user = await User.create({
                     name: input.name,
+                    username: input.username,
                     email: input.email,
                     passwordHash: await hashPassword(input.password),
+                    dateOfBirth: new Date(`${input.dateOfBirth}T00:00:00Z`),
+                    interests: input.interests,
+                    termsAcceptedAt: new Date(),
+                    marketingOptIn: input.marketingOptIn ?? false,
                 });
             } catch (error) {
-                // Two registrations with the same email at once.
-                if (isDuplicateKey(error)) {
-                    emailTaken();
+                // Two registrations with the same email or username at once.
+                const field = duplicateField(error);
+                if (field) {
+                    sendValidationErrors(res, { [field]: TAKEN[field] ?? 'Already taken.' });
                     return;
                 }
                 throw error;
@@ -98,6 +117,27 @@ export function createAuthRouter(config: Config, logger: Logger): Router {
 
             const tokens = await sessions.issueSession(user, clientContext(req));
             await sendTokens(res, tokens, 201);
+        },
+    );
+
+    /**
+     * Live check for the signup form. Usernames are public handles, so this
+     * reveals nothing private (unlike an email check, which we don't offer).
+     */
+    router.get(
+        '/username-available',
+        perIpLimiter('username-check', 60, HOUR_MS),
+        async (req, res) => {
+            const parsed = usernameSchema.safeParse(req.query.username);
+            let body: UsernameAvailability;
+            if (!parsed.success) {
+                body = { available: false, reason: parsed.error.issues[0]?.message ?? 'Invalid username' };
+            } else if (await User.exists({ username: parsed.data })) {
+                body = { available: false, reason: TAKEN.username };
+            } else {
+                body = { available: true };
+            }
+            res.json(body);
         },
     );
 

@@ -3,7 +3,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import { User } from '../src/models/User.js';
-import { registerUser, useTestApp } from './support/app.js';
+import { registerUser, useTestApp, validRegistration } from './support/app.js';
 
 const { app } = useTestApp();
 
@@ -85,12 +85,9 @@ describe('PATCH /api/admin/users/:id/role', () => {
     });
 
     it('new accounts are always plain users', async () => {
-        const res = await request(app).post('/api/auth/register').send({
-            name: 'Sneaky',
-            email: 'sneaky@example.com',
-            password: 'password-123',
-            role: 'admin',
-        });
+        const res = await request(app)
+            .post('/api/auth/register')
+            .send(validRegistration({ name: 'Sneaky', role: 'admin' }));
         expect(res.status).toBe(201);
         expect(res.body.user.role).toBe('user');
     });

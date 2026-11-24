@@ -58,18 +58,27 @@ export const CSRF = { 'X-Requested-With': 'XMLHttpRequest' };
 
 let counter = 0;
 
+/** A complete, valid register body with a unique email and username. */
+export function validRegistration(overrides: Record<string, unknown> = {}) {
+    counter += 1;
+    return {
+        name: 'Test User',
+        username: `user${counter}`,
+        email: `user${counter}@example.com`,
+        password: 'correct-horse-battery-9',
+        dateOfBirth: '1995-06-15',
+        interests: ['Programming'],
+        acceptTerms: true,
+        ...overrides,
+    };
+}
+
 /** Registers a fresh user; returns its access token and refresh cookie. */
 export async function registerUser(
     app: Parameters<typeof request>[0],
-    overrides: Partial<{ name: string; email: string; password: string }> = {},
+    overrides: Partial<{ name: string; username: string; email: string; password: string }> = {},
 ) {
-    counter += 1;
-    const body = {
-        name: 'Test User',
-        email: `user${counter}@example.com`,
-        password: 'correct-horse-battery',
-        ...overrides,
-    };
+    const body = validRegistration(overrides);
     const res = await request(app).post('/api/auth/register').send(body);
     if (res.status !== 201) {
         throw new Error(`register failed: ${res.status} ${JSON.stringify(res.body)}`);

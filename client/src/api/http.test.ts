@@ -21,7 +21,7 @@ function adapter(handler: (config: InternalAxiosRequestConfig) => Reply | Promis
 
 const authResponse = (accessToken: string): AuthResponse => ({
   accessToken,
-  user: { id: 'u1', name: 'Ada', email: 'ada@example.com', role: 'user', avatarUrl: null, createdAt: '' },
+  user: { id: 'u1', name: 'Ada', username: 'ada', email: 'ada@example.com', role: 'user', avatarUrl: null, createdAt: '' },
 })
 
 /** API that accepts only `Bearer new`. */

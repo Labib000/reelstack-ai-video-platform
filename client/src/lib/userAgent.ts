@@ -46,3 +46,6 @@ export function timeAgo(iso: string, now = Date.now()): string {
   }
   return 'just now'
 }
+
+/** True for phones and tablets, to pick a device icon. */
+export const isMobileUserAgent = (ua: string | null) => !!ua && /Android|iPhone|iPad|Mobile/.test(ua)

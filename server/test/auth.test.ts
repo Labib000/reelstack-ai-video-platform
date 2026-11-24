@@ -2,7 +2,7 @@ import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RefreshToken } from '../src/models/RefreshToken.js';
-import { CSRF, refreshCookie, registerUser, useTestApp } from './support/app.js';
+import { CSRF, refreshCookie, registerUser, useTestApp, validRegistration } from './support/app.js';
 
 const { app } = useTestApp();
 
@@ -18,15 +18,13 @@ afterEach(() => {
 
 describe('register', () => {
     it('returns an access token and sets an httpOnly refresh cookie on /api/auth', async () => {
-        const res = await request(app).post('/api/auth/register').send({
-            name: 'Ada',
-            email: 'Ada@Example.com',
-            password: 'correct-horse-battery',
-        });
+        const res = await request(app)
+            .post('/api/auth/register')
+            .send(validRegistration({ name: 'Ada', username: 'Ada.L', email: 'Ada@Example.com' }));
 
         expect(res.status).toBe(201);
         expect(res.body.accessToken).toEqual(expect.any(String));
-        expect(res.body.user).toMatchObject({ name: 'Ada', email: 'ada@example.com', role: 'user' });
+        expect(res.body.user).toMatchObject({ name: 'Ada', username: 'ada.l', email: 'ada@example.com', role: 'user' });
         expect(res.body.user).not.toHaveProperty('passwordHash');
 
         const cookie = (res.headers['set-cookie'] as unknown as string[])[0]!;
@@ -48,11 +46,9 @@ describe('register', () => {
 
     it('rejects a duplicate email with 422', async () => {
         await registerUser(app, { email: 'dup@example.com' });
-        const res = await request(app).post('/api/auth/register').send({
-            name: 'Again',
-            email: 'DUP@example.com',
-            password: 'another-password',
-        });
+        const res = await request(app)
+            .post('/api/auth/register')
+            .send(validRegistration({ name: 'Again', email: 'DUP@example.com' }));
 
         expect(res.status).toBe(422);
         expect(res.body.errors).toHaveProperty('email');
@@ -64,7 +60,15 @@ describe('register', () => {
             .send({ name: '', email: 'not-an-email', password: 'short' });
 
         expect(res.status).toBe(422);
-        expect(Object.keys(res.body.errors).sort()).toEqual(['email', 'name', 'password']);
+        expect(Object.keys(res.body.errors).sort()).toEqual([
+            'acceptTerms',
+            'dateOfBirth',
+            'email',
+            'interests',
+            'name',
+            'password',
+            'username',
+        ]);
     });
 });
 
