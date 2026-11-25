@@ -67,13 +67,27 @@ A long-form video platform built with the MERN stack and TypeScript. It has adap
 - **Watch page:**
   - a player with a console holding **Ask this video**, **Chapters** and **Transcript** tabs
   - clickable timestamp chips
+- **Admin console** (`/admin`) for moderators and admins:
+  - **Dashboard:** live user totals, a 30-day signup chart, role split, top interests, newest members, video count, storage used and pipeline failures
+  - **Users:** search by name, email or @handle; filter by role and status; change roles; sign a user out of every device; suspend or unsuspend
+  - **Audit log:** every admin action, who did it and when
+  - **Videos:** every upload with owner, size, resolution and pipeline state; remove with a reason (the owner sees it), restore, re-run a failed file check, all audited
+  - **Reports:** a moderation queue on demo data until comments exist
+  - **After login, staff choose** between the admin console and the app (and can remember the choice)
+- **Direct-to-storage video uploads:**
+  - the browser splits the file into 10 MB parts and PUTs them **straight to S3-compatible storage** (RustFS locally, R2 in prod) with presigned URLs; video bytes never pass through the API
+  - 4 parts in flight, per-part retry with backoff and a fresh URL, live MB/s and time left, cancel at any point (the multipart upload is aborted)
+  - on completion the API checks the stored size against what the client claimed, then queues a job (a mismatch marks the video failed and deletes the file)
+  - quotas: 5 GB per file, 3 uploads in progress and 10 a day per user
+- **Background worker (BullMQ):** a separate process runs **ffprobe** on each upload over a presigned URL (no full download), rejects files that aren't real videos with a plain-language reason (playlist formats and non-HTTP protocols are blocked, so an upload can't make the worker fetch other URLs), retries when storage is down, records duration, resolution and codec, and sweeps uploads abandoned for 24 hours.
+- **Your videos:** live status (Uploading → Checking file → Waiting to transcode), edit title, description and visibility, delete (removes the files from storage too).
+- **Account suspension that takes effect immediately:** login, token refresh and every authenticated request refuse a suspended account, and all its sessions are revoked.
 - **Health endpoint** reporting MongoDB and Redis status.
 
-> The video catalogue, transcripts and Ask answers in the UI currently come from a typed placeholder data layer (`client/src/data/`). That layer gets swapped for the real API in the phases below.
+> The browse catalogue (home, explore, watch), transcripts and Ask answers still come from a typed placeholder data layer (`client/src/data/`) until uploaded videos can be played (Phase 3–4). Uploads, Your videos and the admin console use the real API.
 
 ### In progress / planned
-- Direct-to-storage chunked uploads (S3 multipart, presigned URLs)
-- **BullMQ + FFmpeg** worker: transcode to a 360p/720p/1080p HLS ladder plus a thumbnail
+- **FFmpeg** transcode in the worker: a 360p/720p/1080p HLS ladder plus a thumbnail
 - **Groq Whisper** transcription, then embeddings, then **RAG with timestamp citations**
 - **Prometheus + Grafana** monitoring with a provisioned dashboard
 - GitHub Actions CI and a production deploy
@@ -90,9 +104,10 @@ See the [Roadmap](#roadmap) for details.
 | **Server** | Node.js ≥ 24, Express 5, Mongoose, zod, argon2, jsonwebtoken, Helmet, express-rate-limit, pino |
 | **Shared** | `@reelstack/shared`: zod schemas, DTO types, the permission map (one source of truth for both sides) |
 | **Database** | MongoDB 8 |
-| **Cache / limits / queue** | Redis 7 via ioredis (rate limits today; the BullMQ job queue next) |
+| **Cache / limits / queue** | Redis 7 via ioredis (rate limits) and **BullMQ** (media jobs) |
+| **Storage** | S3 API via `@aws-sdk/client-s3`: multipart uploads with presigned part URLs (RustFS locally, Cloudflare R2 in prod) |
 | **Object storage** | RustFS locally (S3-compatible), Cloudflare R2 in production |
-| **Media** *(planned)* | FFmpeg → adaptive HLS, played with hls.js |
+| **Media** | ffprobe file checks today; FFmpeg → adaptive HLS with hls.js next |
 | **AI** *(planned)* | Groq Whisper (transcripts), local bge-small embeddings, Groq LLM for answers |
 | **Monitoring** *(planned)* | prom-client → Prometheus → Grafana |
 | **Testing** | Vitest, Supertest, mongodb-memory-server |
@@ -111,27 +126,57 @@ flowchart LR
     subgraph API["Express API (:4000)"]
         AUTH["/api/auth<br/>JWT + refresh rotation"]
         ADMIN["/api/admin<br/>roles & permissions"]
+        VIDEOS["/api/videos<br/>uploads"]
         HEALTH["/api/health"]
     end
 
     UI -- "access token (memory)<br/>refresh cookie (httpOnly)" --> API
-    API --> MONGO[("MongoDB<br/>users, sessions,<br/>rate-limit fallback")]
-    API --> REDIS[("Redis<br/>rate limits")]
-    API -. presigned URLs .-> S3[("RustFS / R2<br/>source + HLS")]
+    UI == "10 MB parts, presigned PUT" ==> S3[("RustFS / R2<br/>uploads/ · hls/")]
+    API --> MONGO[("MongoDB<br/>users, sessions, videos,<br/>audit log")]
+    API --> REDIS[("Redis<br/>rate limits · BullMQ")]
+    API -- "create / complete<br/>multipart" --> S3
+    REDIS --> W["Worker<br/>ffprobe check · cleanup"]
+    W -- "presigned GET" --> S3
+    W --> MONGO
 
     subgraph Planned
         direction TB
-        Q["BullMQ queue"] --> W["Worker<br/>FFmpeg · Whisper · embeddings"]
-        W --> S3
+        T["FFmpeg HLS · Whisper · embeddings"]
         PROM["Prometheus"] --> GRAF["Grafana"]
     end
 
-    REDIS -.-> Q
+    W -.-> T
     API -. /metrics .-> PROM
     W -. /metrics .-> PROM
 ```
 
-Solid lines are running today. Dotted lines and the **Planned** box are the next phases.
+Solid lines are running today; dotted lines and the **Planned** box are the next phases.
+
+### Upload flow
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as API
+    participant S as RustFS / R2
+    participant Q as BullMQ
+    participant W as Worker
+    B->>A: POST /videos {name, size, type, title}
+    A->>A: quotas, then Video {status: uploading}
+    A->>S: CreateMultipartUpload
+    A-->>B: {video, partSize, partCount}
+    loop 4 parts at a time
+        B->>A: POST /videos/:id/parts (batches of 20)
+        A-->>B: presigned UploadPart URLs
+        B->>S: PUT part → ETag
+    end
+    B->>A: POST /videos/:id/complete {parts + ETags}
+    A->>S: CompleteMultipartUpload, HeadObject (size must match)
+    A->>Q: probe job, status processing
+    Q->>W: probe
+    W->>S: ffprobe over a presigned GET
+    W->>W: video stream? 1 s – 6 h? save duration, resolution
+```
 
 ---
 
@@ -181,7 +226,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 # 3. Start MongoDB, Redis, RustFS and mongo-express (waits for the healthchecks)
 npm run infra:up
 
-# 4. Run shared (watch), the API and the client together
+# 4. Run shared (watch), the API, the worker and the client together
 npm run dev
 ```
 
@@ -192,7 +237,20 @@ npm run dev
 | http://localhost:8081 | mongo-express (database browser) |
 | http://localhost:9001/rustfs/console/ | RustFS console (object storage) |
 
-**Make yourself an admin** (after you've registered in the app):
+**Try the admin console with demo data:**
+
+```bash
+npm run seed:demo
+```
+
+This creates a demo admin, a demo moderator, about 40 users with spread-out signup dates, interests and a few suspensions, plus audit history. It's safe to re-run (it replaces the previous demo data) and refuses to run with `NODE_ENV=production`.
+
+| Account | Email | Password |
+|---|---|---|
+| Admin | `admin@demo.reelstack.test` | `ReelStack-demo-2026` |
+| Moderator | `mod@demo.reelstack.test` | `ReelStack-demo-2026` |
+
+**Or make your own account an admin** (after registering in the app):
 
 ```bash
 npm run user:role -- you@example.com admin     # user | moderator | admin
@@ -208,9 +266,9 @@ Everything runs from `docker-compose.yml`. All ports bind to `127.0.0.1` only, a
 |---|---|---|---|
 | **mongo** | `mongo:8` | 27017 | Main database: users, refresh-token families, the rate-limit fallback |
 | **mongo-express** | `mongo-express` | 8081 | Web UI for the database (basic auth from `.env`) |
-| **redis** | `redis:7-alpine` | 6379 | Rate-limit store; the BullMQ queue next. Runs AOF persistence with `noeviction`, so queued jobs are never dropped |
+| **redis** | `redis:7-alpine` | 6379 | Rate-limit store and the BullMQ job queue. Runs AOF persistence with `noeviction`, so queued jobs are never dropped |
 | **rustfs** | `rustfs/rustfs` | 9000 (S3), 9001 (console) | S3-compatible object storage, standing in for Cloudflare R2 |
-| **storage-init** | `rustfs/rustfs` | none | One-shot job that creates the bucket with a SigV4-signed `PUT` (no extra CLI image) |
+| **storage-init** | `rustfs/rustfs` | none | One-shot job that creates the bucket and sets its **CORS rule** (PUT from `APP_URL`, `ETag` exposed) with SigV4-signed `curl` calls (no extra CLI image) |
 
 ```bash
 npm run infra:up      # start + wait for the healthchecks
@@ -221,7 +279,9 @@ docker compose down -v   # ⚠ also deletes all local data
 
 > **Why RustFS and not MinIO?** MinIO stopped publishing free container images. RustFS is Apache-2.0 and speaks the same S3 API, so the code is identical against R2 in production.
 
-**Redis is optional in development.** If it's unreachable, the API logs a warning once, `/api/health` reports `redis: "down"`, and rate limiting falls back to MongoDB for each call.
+**Redis is optional for the API, required for the worker.** If it's unreachable, the API logs a warning once, `/api/health` reports `redis: "down"`, and rate limiting falls back to MongoDB for each call. Uploads still complete, but with no Redis the file check can't be queued, so new videos stay at *Checking file* until the worker's hourly sweep re-queues them.
+
+> **Bucket CORS is required for browser uploads.** Locally `storage-init` sets it. On **Cloudflare R2**, add a CORS policy in the dashboard: allowed origin = your app URL, methods `PUT, GET, HEAD`, headers `*`, and **expose `ETag`**, otherwise the browser can't read part ETags and uploads fail at the first part.
 
 ### Monitoring stack *(planned: Phase 6)*
 
@@ -255,6 +315,8 @@ From `.env.example`. Never commit `.env`.
 | `S3_REGION` | `us-east-1` | |
 | `S3_BUCKET` | `reelstack` | Created by `storage-init` |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | `rustfsadmin` | Also the RustFS console login |
+| `S3_PUBLIC_ENDPOINT` | *(empty → `S3_ENDPOINT`)* | The storage URL browsers reach; presigned URLs are signed for it |
+| `UPLOAD_MAX_BYTES` | *(empty → 5 GB)* | Largest file the API accepts |
 | `GROQ_API_KEY` | *(empty)* | Whisper and the LLM for Ask the Video (planned) |
 | `MONGO_EXPRESS_USER` / `MONGO_EXPRESS_PASSWORD` | `admin` / `reelstack` | mongo-express basic auth |
 
@@ -266,13 +328,15 @@ Run these from the repo root.
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Build `shared`, then run shared (watch), the API (`tsx watch`) and the client (Vite) together |
+| `npm run dev` | Build `shared`, then run shared (watch), the API, the **worker** (both `tsx watch`) and the client (Vite) together |
+| `npm run worker` | Run only the media worker (needs `REDIS_URL`) |
 | `npm run build` | Build shared, then server, then client |
 | `npm test` | Server tests, then client tests |
 | `npm run typecheck` | Type-check shared and server |
 | `npm run lint` | oxlint on the client |
 | `npm run infra:up` / `infra:down` | Start / stop the Docker services |
 | `npm run user:role -- <email> <role>` | Change a user's role from the CLI |
+| `npm run seed:demo` | Fill the dev database with demo staff, users and audit history |
 
 ---
 
@@ -292,7 +356,29 @@ All routes are under `/api`. Errors use one shape, `{ message, errors? }`; valid
 | `GET` | `/auth/me` | Bearer | The current user |
 | `GET` | `/auth/sessions` | Bearer | Signed-in devices |
 | `DELETE` | `/auth/sessions/:familyId` | Bearer | Sign one device out |
-| `PATCH` | `/admin/users/:id/role` | Bearer + `user:set-role` | Change a role (admin only) |
+| `GET` | `/admin/stats` | Bearer + `moderation:view` | Dashboard numbers: totals, signups by day, roles, interests, active sessions |
+| `GET` | `/admin/users?q=&role=&status=&sort=&page=` | Bearer + `user:view` | Search and paginate users |
+| `GET` | `/admin/users/:id` | Bearer + `user:view` | One user, with account state |
+| `PATCH` | `/admin/users/:id/role` | Bearer + `user:set-role` | Change a role (audited) |
+| `POST` | `/admin/users/:id/ban` | Bearer + `user:ban` | Suspend with a reason; revokes every session |
+| `POST` | `/admin/users/:id/unban` | Bearer + `user:ban` | Lift a suspension |
+| `POST` | `/admin/users/:id/revoke-sessions` | Bearer + `user:ban` | Sign the user out of every device |
+| `GET` | `/admin/audit?action=&target=&page=` | Bearer + `audit:view` | The audit log |
+| `POST` | `/videos` | Bearer | Start an upload: quotas, Video record, multipart upload. 30 per hour per IP |
+| `POST` | `/videos/:id/parts` | Bearer (owner) | Presigned part URLs, up to 20 per call |
+| `POST` | `/videos/:id/complete` | Bearer (owner) | Assemble the parts, verify the size, queue the file check |
+| `DELETE` | `/videos/:id/upload` | Bearer (owner) | Cancel an upload in progress |
+| `GET` | `/videos/mine` | Bearer | Your videos with their status |
+| `GET` / `PATCH` / `DELETE` | `/videos/:id` | Bearer (owner; moderators can `GET`) | One video; edit details; delete it and its files |
+| `GET` | `/admin/videos?q=&status=&page=` | Bearer + `moderation:view` | Every upload, with owner |
+| `POST` | `/admin/videos/:id/remove` · `/restore` | Bearer + `video:moderate` | Take down with a reason / put back (audited) |
+| `POST` | `/admin/videos/:id/reprocess` | Bearer + `video:moderate` | Re-run a failed file check (audited) |
+
+| Permission | Moderator | Admin |
+|---|:-:|:-:|
+| `moderation:view` (console, dashboard, content queues) | ✓ | ✓ |
+| `video:moderate`, `comment:moderate` | ✓ | ✓ |
+| `user:view`, `user:ban`, `user:set-role`, `audit:view` | | ✓ |
 
 Username availability is public on purpose (handles are public). There is deliberately **no** email availability endpoint, to avoid account enumeration.
 
@@ -308,17 +394,21 @@ reelstack/
 │   ├── src/
 │   │   ├── auth/           tokens, refresh rotation, cookies, argon2
 │   │   ├── middleware/     requireAuth, requirePermission, CSRF, rate limits, validation
-│   │   ├── models/         User, RefreshToken, RateLimit
-│   │   ├── routes/         auth, admin, health
-│   │   ├── lib/            logger (pino), redis, rate-limit store
-│   │   └── cli/            setRole
+│   │   ├── models/         User, RefreshToken, RateLimit, AuditLog, Video
+│   │   ├── routes/         auth, admin, videos, health
+│   │   ├── lib/            logger (pino), redis, rate-limit store, storage (S3), queue (BullMQ)
+│   │   ├── media/          probe: ffprobe check + stale-upload cleanup
+│   │   ├── worker.ts       the BullMQ worker process
+│   │   └── cli/            setRole, seedDemo
 │   └── test/               Vitest + Supertest (in-memory MongoDB)
 ├── client/                 React + Vite
 │   └── src/
 │       ├── pages/          Home, Watch, Explore, Library, Login, Register, …
-│       ├── components/     shell/ · media/ · watch/ · auth/ · ui/ (shadcn)
+│       │   └── admin/      Dashboard, Users, UserDetail, Audit, Videos, Reports
+│       ├── components/     shell/ · admin/ · media/ · videos/ · watch/ · auth/ · ui/ (shadcn)
 │       ├── auth/           AuthProvider, guards, register-form schema
-│       ├── api/            axios client with refresh handling
+│       ├── api/            axios client with refresh handling; auth, admin, videos calls
+│       ├── lib/upload.ts   chunked upload engine (parts, retries, progress)
 │       ├── data/           placeholder catalogue (replaced by the API later)
 │       └── hooks/          library store, appearance, debounce
 └── docker-compose.yml      mongo · mongo-express · redis · rustfs · storage-init
@@ -330,8 +420,8 @@ reelstack/
 
 ```bash
 npm test                       # everything
-npm run test -w server         # API: auth, rotation, reuse detection, roles, register rules
-npm run test -w client         # client: refresh handling, forms, password scoring, library store
+npm run test -w server         # API: auth, rotation, reuse detection, roles, register rules, admin, uploads, probe
+npm run test -w client         # client: refresh handling, forms, password scoring, library store, upload engine
 ```
 
 - Server tests run against **mongodb-memory-server**, so they don't need Docker.
@@ -341,6 +431,11 @@ npm run test -w client         # client: refresh handling, forms, password scori
   - session revocation
   - rate limits
   - role permissions
+  - the admin API: the stats shape, the permission matrix, user search and pagination, suspension (login, access token and refresh all refused), audit entries
+  - uploads, against in-memory storage and queue fakes: type and size checks, both quotas, owner-only access, missing parts, a size mismatch, cancel, edit and delete
+  - video moderation: remove, restore and reprocess, with audit entries
+  - the worker's file check (valid, no video stream, too short, too long) and the stale-upload sweep
+- Client tests cover the upload engine with a fake `PUT`: the part plan, URL batching, retry then success, giving up, and cancel.
 
 ---
 
@@ -351,8 +446,9 @@ npm run test -w client         # client: refresh handling, forms, password scori
 | 0 | Monorepo, Docker infra | ✅ Done |
 | 1 | JWT auth, refresh rotation, sessions, roles, rate limits, 3-step signup | ✅ Done |
 | — | Client UI: shell, home, watch, library, auth screens | ✅ Done (placeholder data) |
-| 2 | Upload pipeline: S3 multipart direct to RustFS / R2 with presigned URLs | ⏳ Next |
-| 3 | **BullMQ worker:** FFmpeg → 360p/720p/1080p HLS plus a thumbnail, with retries and backoff | 🗓 Planned |
+| — | Admin console: dashboard, users, suspensions, audit log, video moderation, demo seed | ✅ Done (reports on demo data) |
+| 2 | Upload pipeline: S3 multipart direct to RustFS / R2 with presigned URLs, quotas, BullMQ worker with an ffprobe check, Your videos | ✅ Done |
+| 3 | **Transcode:** FFmpeg → 360p/720p/1080p HLS plus a thumbnail in the worker, with retries and backoff | ⏳ Next |
 | 4 | Player (hls.js), comments, likes, subscriptions on the real API | 🗓 Planned |
 | 5 | **Ask the Video:** Whisper transcripts → embeddings → hybrid retrieval → cited answers; moment search | 🗓 Planned |
 | 6 | **Prometheus + Grafana**, k6 load tests, GitHub Actions CI, deploy (API + worker on Render/Fly, client on Vercel, R2, Atlas, managed Redis) | 🗓 Planned |

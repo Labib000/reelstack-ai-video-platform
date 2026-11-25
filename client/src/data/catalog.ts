@@ -323,10 +323,3 @@ export const CONTINUE_WATCHING: Record<string, number> = {
   'rust-ownership': 0.55,
 }
 
-/** Videos owned by the signed-in user, for the Library studio list. */
-export const MY_VIDEO_STATES = [
-  { id: 'my-1', title: 'Conference talk: shipping on Fridays', status: 'ready', visibility: 'public', views: 1_204, durationSec: 1820 },
-  { id: 'my-2', title: 'Pairing session, part 2', status: 'processing', visibility: 'unlisted', views: 0, durationSec: 3300 },
-  { id: 'my-3', title: 'Raw interview footage', status: 'uploading', visibility: 'private', views: 0, durationSec: 0 },
-  { id: 'my-4', title: 'Lecture recording (corrupt file)', status: 'failed', visibility: 'private', views: 0, durationSec: 0 },
-] as const

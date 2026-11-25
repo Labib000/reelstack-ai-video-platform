@@ -1,4 +1,4 @@
-import { type CSSProperties, useState } from 'react'
+import { type CSSProperties, type ReactNode, useState } from 'react'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
 
@@ -16,7 +16,8 @@ function readCollapsed(): boolean {
   }
 }
 
-export default function AppLayout() {
+/** `children` replaces the routed page (used for a 404 outside the app's routes). */
+export default function AppLayout({ children }: { children?: ReactNode }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
 
   const toggle = () =>
@@ -39,7 +40,7 @@ export default function AppLayout() {
       >
         <TopBar />
         <main className="mx-auto max-w-[1400px] px-4 pt-6 pb-20 sm:px-5 lg:px-6">
-          <AnimatedOutlet />
+          {children ?? <AnimatedOutlet />}
         </main>
       </div>
     </TooltipProvider>

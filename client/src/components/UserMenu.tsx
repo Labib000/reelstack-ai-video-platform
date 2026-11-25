@@ -1,7 +1,11 @@
 import { type Role, type UserDTO, can } from '@reelstack/shared'
-import { ClockIcon, HistoryIcon, LaptopIcon, LibraryIcon, LogOutIcon, ShieldCheckIcon } from 'lucide-react'
+import { ClockIcon, HistoryIcon, HomeIcon, LaptopIcon, LayoutDashboardIcon, LibraryIcon, LogOutIcon, RotateCcwIcon } from 'lucide-react'
 import { motion } from 'motion/react'
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
+import { toast } from 'sonner'
+
+import { getStaffLanding, setStaffLanding } from '@/auth/staff-landing'
 
 import { AppearanceSubmenu } from '@/components/AppearanceMenu'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -34,6 +38,9 @@ export function RoleBadge({ role }: { role: Role }) {
 }
 
 export default function UserMenu({ user, onLogout }: { user: UserDTO; onLogout: () => void }) {
+  const inAdmin = useLocation().pathname.startsWith('/admin')
+  const staff = can(user.role, 'moderation:view')
+  const [landing, setLanding] = useState(() => (staff ? getStaffLanding(user.id) : null))
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -85,12 +92,32 @@ export default function UserMenu({ user, onLogout }: { user: UserDTO; onLogout: 
             Sessions
           </Link>
         </DropdownMenuItem>
-        {can(user.role, 'moderation:view') && (
-          <DropdownMenuItem asChild>
-            <Link to="/moderation">
-              <ShieldCheckIcon />
-              Moderation
-            </Link>
+        {staff &&
+          (inAdmin ? (
+            <DropdownMenuItem asChild>
+              <Link to="/">
+                <HomeIcon />
+                Back to ReelStack
+              </Link>
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem asChild>
+              <Link to="/admin">
+                <LayoutDashboardIcon />
+                Admin console
+              </Link>
+            </DropdownMenuItem>
+          ))}
+        {staff && landing && (
+          <DropdownMenuItem
+            onSelect={() => {
+              setStaffLanding(user.id, null)
+              setLanding(null)
+              toast.success('You’ll be asked where to go next time you log in')
+            }}
+          >
+            <RotateCcwIcon />
+            Ask where to land after login
           </DropdownMenuItem>
         )}
         <AppearanceSubmenu />

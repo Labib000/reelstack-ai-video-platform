@@ -1,4 +1,4 @@
-import { ROLES, type Role, type UserDTO } from '@reelstack/shared';
+import { type AdminUserDTO, ROLES, type Role, type UserDTO } from '@reelstack/shared';
 import { type InferSchemaType, Schema, type Types, model } from 'mongoose';
 
 const userSchema = new Schema(
@@ -42,6 +42,11 @@ const userSchema = new Schema(
          * instead of living out their 15 minutes.
          */
         tokenVersion: { type: Number, default: 0 },
+        /** Set while the account is suspended; login, refresh and requireAuth refuse it. */
+        bannedAt: { type: Date, default: null },
+        banReason: { type: String, default: null, maxlength: 200 },
+        bannedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+        lastLoginAt: { type: Date, default: null },
     },
     { timestamps: true, versionKey: false },
 );
@@ -66,5 +71,24 @@ export function toUserDTO(
         role: user.role as Role,
         avatarUrl: user.avatarUrl ?? null,
         createdAt: user.createdAt.toISOString(),
+    };
+}
+
+export function toAdminUserDTO(
+    user: Parameters<typeof toUserDTO>[0] & {
+        bannedAt?: Date | null;
+        banReason?: string | null;
+        lastLoginAt?: Date | null;
+        interests?: string[] | null;
+    },
+    activeSessions: number,
+): AdminUserDTO {
+    return {
+        ...toUserDTO(user),
+        bannedAt: user.bannedAt?.toISOString() ?? null,
+        banReason: user.banReason ?? null,
+        lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+        interests: user.interests ?? [],
+        activeSessions,
     };
 }

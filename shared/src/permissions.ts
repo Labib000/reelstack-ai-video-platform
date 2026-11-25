@@ -17,6 +17,10 @@ export const PERMISSIONS = {
     'user:ban': ['admin'],
     /** Promote or demote between user, moderator and admin. */
     'user:set-role': ['admin'],
+    /** Browse and search all accounts (emails included). */
+    'user:view': ['admin'],
+    /** Read the admin audit log. */
+    'audit:view': ['admin'],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

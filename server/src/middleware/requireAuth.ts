@@ -6,6 +6,8 @@ import { verifyAccessToken } from '../auth/tokens.js';
 import type { Config } from '../config.js';
 import { User } from '../models/User.js';
 
+export const SUSPENDED = 'This account is suspended.';
+
 function unauthorized(res: Response, message = 'Unauthenticated.'): void {
     const body: ApiErrorBody = { message };
     res.status(401).json(body);
@@ -41,10 +43,15 @@ export function requireAuth(
         }
 
         const user = await User.findById(claims.sub)
-            .select('role tokenVersion')
+            .select('role tokenVersion bannedAt')
             .lean();
         if (!user || user.tokenVersion !== claims.tv) {
             unauthorized(res, 'Session has been revoked.');
+            return;
+        }
+        if (user.bannedAt) {
+            const body: ApiErrorBody = { message: SUSPENDED };
+            res.status(403).json(body);
             return;
         }
 

@@ -51,6 +51,12 @@ const envSchema = z.object({
     S3_BUCKET: z.string().trim().default('reelstack'),
     S3_ACCESS_KEY_ID: optionalString,
     S3_SECRET_ACCESS_KEY: optionalString,
+    /** Where browsers reach storage (presigned URLs are signed for it). Defaults to S3_ENDPOINT. */
+    S3_PUBLIC_ENDPOINT: optionalString,
+    UPLOAD_MAX_BYTES: z.preprocess(
+        (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+        z.coerce.number().int().positive().default(5 * 1024 ** 3),
+    ),
 
     GROQ_API_KEY: optionalString,
 });

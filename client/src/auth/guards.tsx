@@ -4,6 +4,7 @@ import { Navigate, Outlet, useLocation, useSearchParams } from 'react-router-dom
 import { Spinner } from '@/components/ui/spinner'
 import { safeNext } from '@/lib/safeNext'
 import { useAuth } from './context'
+import { getStaffLanding, landingPath } from './staff-landing'
 
 function FullPageSpinner() {
   return (
@@ -28,14 +29,24 @@ export function RequireAuth() {
 
 /**
  * Guests only (login, register). Signed-in users go to `?next=` (checked by
- * safeNext) or home, which is also what sends them on right after logging in.
+ * safeNext), which is also what sends them on right after logging in.
+ * Without a `next`, staff get the "where to?" chooser (or their remembered
+ * answer) and everyone else goes home.
  */
 export function RequireGuest() {
-  const { status } = useAuth()
+  const { status, user } = useAuth()
   const [params] = useSearchParams()
 
   if (status === 'loading') return <FullPageSpinner />
-  if (status === 'authenticated') return <Navigate to={safeNext(params.get('next'))} replace />
+  if (status === 'authenticated') {
+    const next = params.get('next')
+    if (next) return <Navigate to={safeNext(next)} replace />
+    if (user && can(user.role, 'moderation:view')) {
+      const saved = getStaffLanding(user.id)
+      return <Navigate to={saved ? landingPath(saved) : '/welcome'} replace />
+    }
+    return <Navigate to="/" replace />
+  }
   return <Outlet />
 }
 

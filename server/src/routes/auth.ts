@@ -26,7 +26,7 @@ import {
 import type { Config } from '../config.js';
 import type { Logger } from '../lib/logger.js';
 import { loginLimiter, perIpLimiter } from '../middleware/rateLimits.js';
-import { requireAuth } from '../middleware/requireAuth.js';
+import { SUSPENDED, requireAuth } from '../middleware/requireAuth.js';
 import { requireCsrfHeader } from '../middleware/requireCsrfHeader.js';
 import { parseOr422, sendValidationErrors } from '../middleware/validate.js';
 import { User, toUserDTO } from '../models/User.js';
@@ -104,6 +104,7 @@ export function createAuthRouter(config: Config, logger: Logger): Router {
                     interests: input.interests,
                     termsAcceptedAt: new Date(),
                     marketingOptIn: input.marketingOptIn ?? false,
+                    lastLoginAt: new Date(),
                 });
             } catch (error) {
                 // Two registrations with the same email or username at once.
@@ -146,7 +147,7 @@ export function createAuthRouter(config: Config, logger: Logger): Router {
         if (!input) return;
 
         const user = await User.findOne({ email: input.email })
-            .select('+passwordHash role tokenVersion')
+            .select('+passwordHash role tokenVersion bannedAt')
             .lean();
 
         // Verify even when the user is missing, so both cases take as long.
@@ -159,6 +160,12 @@ export function createAuthRouter(config: Config, logger: Logger): Router {
             res.status(401).json({ message: 'Invalid email or password.' });
             return;
         }
+        // Only after the password checks out, so this doesn't reveal accounts.
+        if (user.bannedAt) {
+            res.status(403).json({ message: SUSPENDED });
+            return;
+        }
+        await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
 
         const tokens = await sessions.issueSession(user, clientContext(req));
         await sendTokens(res, tokens);

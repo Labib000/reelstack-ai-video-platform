@@ -11,6 +11,9 @@ export const REVOKE_REASONS = [
     'session-revoked',
     /** The user no longer exists. */
     'user-missing',
+    /** The account was suspended, or an admin signed it out everywhere. */
+    'banned',
+    'admin-revoked',
 ] as const;
 export type RevokeReason = (typeof REVOKE_REASONS)[number];
 

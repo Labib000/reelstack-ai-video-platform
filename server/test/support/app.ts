@@ -7,6 +7,8 @@ import { afterAll, afterEach, beforeAll, inject } from 'vitest';
 import { createApp } from '../../src/app.js';
 import { type Config, loadConfig } from '../../src/config.js';
 import { createLogger } from '../../src/lib/logger.js';
+import { MemoryJobs } from '../../src/lib/queue.js';
+import { MemoryStorage } from '../../src/lib/storage.js';
 
 export function testConfig(overrides: Record<string, string> = {}): Config {
     return loadConfig({
@@ -24,7 +26,9 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
  */
 export function useTestApp(overrides: Record<string, string> = {}) {
     const config = testConfig(overrides);
-    const app = createApp(config, createLogger(config));
+    const storage = new MemoryStorage();
+    const jobs = new MemoryJobs();
+    const app = createApp(config, createLogger(config), { storage, jobs });
 
     beforeAll(async () => {
         await mongoose.connect(config.MONGO_URI, {
@@ -36,6 +40,10 @@ export function useTestApp(overrides: Record<string, string> = {}) {
     afterEach(async () => {
         const collections = await mongoose.connection.db!.collections();
         await Promise.all(collections.map((c) => c.deleteMany({})));
+        storage.uploads.clear();
+        storage.objects.clear();
+        storage.nextSize.clear();
+        jobs.probes.length = 0;
     });
 
     afterAll(async () => {
@@ -43,7 +51,7 @@ export function useTestApp(overrides: Record<string, string> = {}) {
         await mongoose.disconnect();
     });
 
-    return { app, config };
+    return { app, config, storage, jobs };
 }
 
 /** The `rs_refresh=...` pair from a response's Set-Cookie, for the next request. */

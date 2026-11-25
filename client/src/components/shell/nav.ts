@@ -8,7 +8,7 @@ import {
   LaptopIcon,
   LibraryIcon,
   type LucideIcon,
-  ShieldCheckIcon,
+  LayoutDashboardIcon,
   TvIcon,
 } from 'lucide-react'
 
@@ -35,4 +35,4 @@ export const YOU_NAV: NavItem[] = [
 ]
 
 export const ACCOUNT_NAV: NavItem[] = [{ to: '/sessions', label: 'Sessions', icon: LaptopIcon }]
-export const MODERATION_NAV: NavItem = { to: '/moderation', label: 'Moderation', icon: ShieldCheckIcon }
+export const MODERATION_NAV: NavItem = { to: '/admin', label: 'Admin console', icon: LayoutDashboardIcon }

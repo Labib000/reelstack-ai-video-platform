@@ -8,14 +8,16 @@
     "client"
   ],
   "scripts": {
-    "dev": "npm run build -w shared && concurrently -k -n shared,server,client -c gray,cyan,magenta \"npm run dev -w shared\" \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev": "npm run build -w shared && concurrently -k -n shared,server,worker,client -c gray,cyan,yellow,magenta \"npm run dev -w shared\" \"npm run dev -w server\" \"npm run worker -w server\" \"npm run dev -w client\"",
+    "worker": "npm run build -w shared && npm run worker -w server",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "test": "npm run build -w shared && npm run test -w server && npm run test -w client",
     "typecheck": "npm run build -w shared && npm run typecheck -w server",
     "lint": "npm run lint -w client",
     "infra:up": "docker compose up -d --wait",
     "infra:down": "docker compose down",
-    "user:role": "npm run build -w shared && npm run user:role -w server --"
+    "user:role": "npm run build -w shared && npm run user:role -w server --",
+    "seed:demo": "npm run build -w shared && npm run seed:demo -w server"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",

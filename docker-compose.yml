@@ -60,6 +60,8 @@ services:
 
     # One-shot: creates the bucket with a SigV4-signed S3 PUT (curl can sign
     # S3 requests itself, so no extra CLI image is needed). 409 = already there.
+    # Then sets the bucket CORS rule browsers need for direct uploads: PUT from
+    # the app's origin, with ETag exposed (completing a multipart upload needs it).
     storage-init:
         image: rustfs/rustfs:latest
         depends_on:
@@ -73,11 +75,20 @@ services:
               --user "$$KEY:$$SECRET"
               "http://rustfs:9000/$$BUCKET");
               echo "create bucket $$BUCKET: HTTP $$code";
-              [ "$$code" = 200 ] || [ "$$code" = 409 ]
+              [ "$$code" = 200 ] || [ "$$code" = 409 ] || exit 1;
+              cors="<CORSConfiguration><CORSRule><AllowedOrigin>$$ORIGIN</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule></CORSConfiguration>";
+              code=$$(curl -s -o /dev/null -w '%{http_code}' -X PUT
+              --aws-sigv4 'aws:amz:us-east-1:s3'
+              --user "$$KEY:$$SECRET"
+              -H 'Content-Type: application/xml' --data-binary "$$cors"
+              "http://rustfs:9000/$$BUCKET?cors");
+              echo "bucket CORS for $$ORIGIN: HTTP $$code";
+              [ "$$code" = 200 ]
         environment:
             KEY: ${S3_ACCESS_KEY_ID:-rustfsadmin}
             SECRET: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
             BUCKET: ${S3_BUCKET:-reelstack}
+            ORIGIN: ${APP_URL:-http://localhost:5173}
         restart: 'no'
 
 volumes:

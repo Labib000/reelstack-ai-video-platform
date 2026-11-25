@@ -22,3 +22,17 @@ export function hashString(value: string): number {
   }
   return h >>> 0
 }
+
+/** 1.2 GB / 340.5 MB / 12 KB */
+export function formatBytes(n: number): string {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+/** "2 min left" / "45 s left" */
+export function formatEta(sec: number): string {
+  if (sec >= 3600) return `${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min left`
+  if (sec >= 60) return `${Math.round(sec / 60)} min left`
+  return `${Math.max(1, Math.round(sec))} s left`
+}

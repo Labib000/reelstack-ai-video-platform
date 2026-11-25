@@ -127,11 +127,15 @@ export class RefreshService {
         }
 
         const user = await User.findById(presented.userId)
-            .select('role tokenVersion')
+            .select('role tokenVersion bannedAt')
             .lean();
         if (!user) {
             await this.revokeFamily(presented.familyId, 'user-missing');
             throw new InvalidRefreshError('User no longer exists');
+        }
+        if (user.bannedAt) {
+            await this.revokeFamily(presented.familyId, 'banned');
+            throw new InvalidRefreshError('Account is suspended');
         }
 
         const next = await this.issueSession(user, ctx, {
@@ -216,11 +220,11 @@ export class RefreshService {
      * logout-all: revokes every family and bumps tokenVersion, so access
      * tokens already handed out stop working at the next request.
      */
-    async revokeAllForUser(userId: string): Promise<void> {
+    async revokeAllForUser(userId: string, reason: RevokeReason = 'logout-all'): Promise<void> {
         const id = new Types.ObjectId(userId);
         await RefreshToken.updateMany(
             { userId: id, revokedAt: null },
-            { $set: { revokedAt: new Date(), revokeReason: 'logout-all' } },
+            { $set: { revokedAt: new Date(), revokeReason: reason } },
         );
         await User.updateOne({ _id: id }, { $inc: { tokenVersion: 1 } });
     }
