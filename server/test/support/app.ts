@@ -43,7 +43,9 @@ export function useTestApp(overrides: Record<string, string> = {}) {
         storage.uploads.clear();
         storage.objects.clear();
         storage.nextSize.clear();
+        storage.texts.clear();
         jobs.probes.length = 0;
+        jobs.transcodes.length = 0;
     });
 
     afterAll(async () => {

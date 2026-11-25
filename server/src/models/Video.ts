@@ -1,4 +1,5 @@
 import { type AdminVideoDTO, type OwnVideoDTO, VIDEO_STATUSES, VISIBILITIES, type VideoStatus, type Visibility } from '@reelstack/shared';
+import type { Storage } from '../lib/storage.js';
 import { type InferSchemaType, Schema, type Types, model } from 'mongoose';
 
 const videoSchema = new Schema(
@@ -26,7 +27,17 @@ const videoSchema = new Schema(
         width: { type: Number, default: null },
         height: { type: Number, default: null },
         videoCodec: { type: String, default: null },
+        hasAudio: { type: Boolean, default: false },
         processedAt: { type: Date, default: null },
+
+        // Filled in by the worker's transcode step.
+        /** The run that owns this video's transcode; a newer run supersedes it. */
+        transcodeRunId: { type: String, default: null },
+        transcodeProgress: { type: Number, default: null },
+        /** `hls/{id}/{runId}/`: playlists, one media file per quality, thumbnail. */
+        hlsPrefix: { type: String, default: null },
+        renditions: { type: [Number], default: [] },
+        thumbnailKey: { type: String, default: null },
 
         // Moderation (soft remove: the owner still sees it, nobody else will).
         removedAt: { type: Date, default: null },
@@ -43,7 +54,8 @@ videoSchema.index({ status: 1, createdAt: -1 });
 export type VideoFields = InferSchemaType<typeof videoSchema> & { _id: Types.ObjectId; createdAt: Date };
 export const Video = model('Video', videoSchema, 'videos');
 
-export function toOwnVideoDTO(v: VideoFields): OwnVideoDTO {
+/** Async because the thumbnail needs a signed URL. */
+export async function toOwnVideoDTO(v: VideoFields, storage: Storage): Promise<OwnVideoDTO> {
     return {
         id: v._id.toString(),
         title: v.title,
@@ -57,6 +69,9 @@ export function toOwnVideoDTO(v: VideoFields): OwnVideoDTO {
         height: v.height ?? null,
         createdAt: v.createdAt.toISOString(),
         processedAt: v.processedAt?.toISOString() ?? null,
+        transcodeProgress: v.transcodeProgress ?? null,
+        renditions: v.renditions ?? [],
+        thumbnailUrl: v.thumbnailKey ? await storage.signStable(v.thumbnailKey) : null,
         removedAt: v.removedAt?.toISOString() ?? null,
         removedReason: v.removedReason ?? null,
     };
@@ -64,10 +79,10 @@ export function toOwnVideoDTO(v: VideoFields): OwnVideoDTO {
 
 type PopulatedOwner = { _id: Types.ObjectId; name: string; username?: string | null } | null;
 
-export function toAdminVideoDTO(v: Omit<VideoFields, 'owner'> & { owner: PopulatedOwner | Types.ObjectId }): AdminVideoDTO {
+export async function toAdminVideoDTO(v: Omit<VideoFields, 'owner'> & { owner: PopulatedOwner | Types.ObjectId }, storage: Storage): Promise<AdminVideoDTO> {
     const owner = v.owner && 'name' in v.owner ? v.owner : null;
     return {
-        ...toOwnVideoDTO(v as unknown as VideoFields),
+        ...(await toOwnVideoDTO(v as unknown as VideoFields, storage)),
         owner: owner ? { id: owner._id.toString(), name: owner.name, username: owner.username ?? null } : null,
     };
 }

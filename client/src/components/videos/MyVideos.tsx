@@ -1,5 +1,5 @@
 import type { OwnVideoDTO } from '@reelstack/shared'
-import { ClapperboardIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, Trash2Icon, TriangleAlertIcon } from 'lucide-react'
+import { ClapperboardIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TriangleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -35,7 +35,7 @@ export default function MyVideos() {
   const [deleting, setDeleting] = useState<OwnVideoDTO | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // Keep statuses fresh while anything is still uploading or being checked.
+  // Keep statuses fresh while anything is still being uploaded, checked or transcoded.
   const active = data?.some(isActive) ?? false
   useEffect(() => {
     if (!active) return
@@ -108,13 +108,21 @@ export default function MyVideos() {
         <ul className="glass divide-y divide-glass-border overflow-hidden rounded-2xl">
           {data.map((v) => (
             <li key={v.id} className="flex items-center gap-3 p-3 sm:gap-4">
-              <Poster seed={v.id} title={v.title} showTitle={false} className="aspect-video w-24 shrink-0 rounded-lg sm:w-28" />
+              <Poster seed={v.id} title={v.title} thumbnailUrl={v.thumbnailUrl} showTitle={false} className="aspect-video w-24 shrink-0 rounded-lg sm:w-28" />
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{v.title}</p>
+                <p className="truncate font-medium">
+                  {v.status === 'ready' ? (
+                    <Link to={`/watch/${v.id}`} className="hover:underline">
+                      {v.title}
+                    </Link>
+                  ) : (
+                    v.title
+                  )}
+                </p>
                 <p className="truncate text-sm text-muted-foreground">
                   <span className="capitalize">{v.visibility}</span> · {formatBytes(v.sizeBytes)}
                   {v.durationSec != null && ` · ${formatDuration(v.durationSec)}`}
-                  {v.height != null && ` · ${v.height}p`}
+                  {v.width != null && v.height != null && ` · ${Math.min(v.width, v.height)}p`}
                 </p>
                 <StageBadge video={v} className="mt-1 sm:hidden" />
                 {(v.status === 'failed' || v.removedAt) && (
@@ -132,6 +140,13 @@ export default function MyVideos() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-44">
+                  {v.status === 'ready' && (
+                    <DropdownMenuItem asChild>
+                      <Link to={`/watch/${v.id}`}>
+                        <PlayIcon /> Watch
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onSelect={() => setEditing(v)}>
                     <PencilIcon /> Edit details
                   </DropdownMenuItem>

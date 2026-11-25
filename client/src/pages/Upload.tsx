@@ -68,8 +68,8 @@ function Pipeline({ video, uploading }: { video: OwnVideoDTO | null; uploading: 
   const stage = video ? videoStage(video) : 'uploading'
   const steps = [
     { label: 'Upload', done: !uploading && stage !== 'uploading', active: uploading || stage === 'uploading' },
-    { label: 'Check file', done: stage === 'queued' || stage === 'ready', active: stage === 'checking' },
-    { label: 'Transcode', done: stage === 'ready', active: stage === 'queued', note: 'coming in the next phase' },
+    { label: 'Check file', done: stage === 'queued' || stage === 'transcoding' || stage === 'ready', active: stage === 'checking' },
+    { label: stage === 'transcoding' ? `Transcoding ${video?.transcodeProgress ?? 0}%` : 'Transcode', done: stage === 'ready', active: stage === 'queued' || stage === 'transcoding', waiting: stage === 'queued' },
     { label: 'Ready to watch', done: stage === 'ready', active: false },
   ]
   return (
@@ -78,10 +78,10 @@ function Pipeline({ video, uploading }: { video: OwnVideoDTO | null; uploading: 
         <li key={s.label} className="min-w-0">
           <div className={cn('h-1 rounded-full', s.done ? 'bg-brand' : s.active ? 'bg-brand/40' : 'bg-muted')} />
           <p className={cn('mt-2 flex items-center gap-1 truncate text-xs font-medium', s.done || s.active ? 'text-foreground' : 'text-muted-foreground')}>
-            {s.done ? <CheckIcon className="size-3.5 text-brand" /> : s.active ? s.note ? <ClockIcon className="size-3.5" /> : <Spinner className="size-3" /> : <span className="tabular-nums">{i + 1}.</span>}
+            {s.done ? <CheckIcon className="size-3.5 text-brand" /> : s.active ? s.waiting ? <ClockIcon className="size-3.5" /> : <Spinner className="size-3" /> : <span className="tabular-nums">{i + 1}.</span>}
             <span className="truncate">{s.label}</span>
           </p>
-          {s.note && s.active && <p className="truncate text-[11px] text-muted-foreground">{s.note}</p>}
+          {s.waiting && <p className="truncate text-[11px] text-muted-foreground">in the queue</p>}
         </li>
       ))}
     </ol>
@@ -117,7 +117,7 @@ export default function Upload() {
   }, [uploading])
   useEffect(() => () => controller.current?.abort(), [])
 
-  // After upload: poll until the file check finishes.
+  // After upload: poll until it's ready (or failed).
   const doneVideo = phase.kind === 'done' ? phase.video : null
   useEffect(() => {
     if (!doneVideo || !isActive(doneVideo)) return
@@ -286,7 +286,7 @@ export default function Upload() {
   else if (phase.video.status === 'failed') statusLine = phase.video.error ?? 'We couldn’t process this file.'
   else if (videoStage(phase.video) === 'checking') statusLine = 'Uploaded. Checking the file…'
   else
-    statusLine = `Uploaded and checked${phase.video.durationSec ? ` · ${formatDuration(phase.video.durationSec)}` : ''}${phase.video.height ? ` · ${phase.video.height}p` : ''}`
+    statusLine = `${phase.video.status === 'ready' ? 'Ready to watch' : 'Uploaded and checked'}${phase.video.durationSec ? ` · ${formatDuration(phase.video.durationSec)}` : ''}${phase.video.width && phase.video.height ? ` · ${Math.min(phase.video.width, phase.video.height)}p` : ''}`
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -298,7 +298,7 @@ export default function Upload() {
           {failed
             ? phase.kind === 'error'
               ? 'The upload didn’t finish. Nothing was saved, so you can try again.'
-              : 'It uploaded, but it isn’t a video we can play. Export it again as MP4 (H.264) and try once more.'
+              : 'It uploaded, but we couldn’t turn it into something people can watch. Exporting it again as MP4 (H.264) usually helps.'
             : uploading
               ? 'Keep this tab open until the upload finishes. You can fill in the details meanwhile.'
               : 'You can edit the details any time from Your videos.'}
@@ -377,6 +377,11 @@ export default function Upload() {
             <div className="flex gap-2">
               {phase.kind === 'done' && (
                 <>
+                  {phase.video.status === 'ready' && (
+                    <Button asChild className="rounded-full">
+                      <Link to={`/watch/${phase.video.id}`}>Watch</Link>
+                    </Button>
+                  )}
                   <Button variant="outline" className="rounded-full" onClick={reset}>
                     Upload another
                   </Button>

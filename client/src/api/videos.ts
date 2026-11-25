@@ -8,6 +8,7 @@ import type {
   SignedPartDTO,
   UpdateVideoInput,
   UploadSessionDTO,
+  WatchVideoDTO,
 } from '@reelstack/shared'
 
 import { api } from './http'
@@ -25,6 +26,9 @@ export const cancelUpload = (id: string) => api.delete(`/videos/${id}/upload`).t
 export const myVideos = (signal?: AbortSignal) => api.get<{ videos: OwnVideoDTO[] }>('/videos/mine', { signal }).then((r) => r.data.videos)
 
 export const getVideo = (id: string, signal?: AbortSignal) => api.get<{ video: OwnVideoDTO }>(`/videos/${id}`, { signal }).then((r) => r.data.video)
+
+export const watchVideo = (id: string, signal?: AbortSignal) =>
+  api.get<{ video: WatchVideoDTO }>(`/videos/${id}/watch`, { signal }).then((r) => r.data.video)
 
 export const updateVideo = (id: string, input: UpdateVideoInput) =>
   api.patch<{ video: OwnVideoDTO }>(`/videos/${id}`, input).then((r) => r.data.video)

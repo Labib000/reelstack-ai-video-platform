@@ -10,6 +10,7 @@ import { apiNotFound, errorHandler } from './middleware/errors.js';
 import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
 import { healthRouter } from './routes/health.js';
+import { createPlaybackRouter } from './routes/playback.js';
 import { createVideosRouter } from './routes/videos.js';
 
 export interface AppDeps {
@@ -37,6 +38,8 @@ export function createApp(config: Config, logger: Logger, deps: AppDeps = defaul
     app.use('/api/health', healthRouter);
     app.use('/api/auth', createAuthRouter(config, logger));
     app.use('/api/admin', createAdminRouter(config, logger, deps.storage, deps.jobs));
+    // Before /api/videos, which requires signing in: watching doesn't.
+    app.use('/api', createPlaybackRouter(config, deps.storage));
     app.use('/api/videos', createVideosRouter(config, logger, deps.storage, deps.jobs));
 
     app.use('/api', apiNotFound);

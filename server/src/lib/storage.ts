@@ -3,6 +3,11 @@
  * production (both speak S3). Browsers upload straight to it with presigned
  * multipart URLs, so video bytes never pass through the API.
  */
+import { createReadStream, createWriteStream } from 'node:fs';
+import { copyFile, readFile, stat, writeFile } from 'node:fs/promises';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+
 import {
     AbortMultipartUploadCommand,
     CompleteMultipartUploadCommand,
@@ -14,6 +19,7 @@ import {
     S3Client,
     UploadPartCommand,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import type { Config } from '../config.js';
@@ -27,6 +33,11 @@ export interface Storage {
     head(key: string): Promise<number | null>;
     /** A short-lived GET URL (the worker hands it to ffprobe). */
     signGet(key: string, expiresSec?: number, internal?: boolean): Promise<string>;
+    /** A browser GET URL that stays the same for half an hour, so images stay cached. */
+    signStable(key: string): Promise<string>;
+    downloadTo(key: string, path: string, signal?: AbortSignal): Promise<void>;
+    putFile(key: string, path: string, contentType: string, signal?: AbortSignal): Promise<void>;
+    getText(key: string): Promise<string>;
     /** Deletes every object under a prefix; returns how many. */
     deletePrefix(prefix: string): Promise<number>;
 }
@@ -103,6 +114,42 @@ export class S3Storage implements Storage {
         return getSignedUrl(internal ? this.client : this.publicClient, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: expiresSec });
     }
 
+    signStable(key: string) {
+        const step = 30 * 60_000;
+        return getSignedUrl(this.publicClient, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
+            expiresIn: 2 * 3600,
+            signingDate: new Date(Math.floor(Date.now() / step) * step),
+        });
+    }
+
+    async downloadTo(key: string, path: string, signal?: AbortSignal) {
+        const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }), { abortSignal: signal });
+        await pipeline(res.Body as Readable, createWriteStream(path), { signal });
+    }
+
+    /** Multipart, because a long 1080p file can pass the 5 GB single-PUT limit. */
+    async putFile(key: string, path: string, contentType: string, signal?: AbortSignal) {
+        const upload = new Upload({
+            client: this.client,
+            params: { Bucket: this.bucket, Key: key, Body: createReadStream(path), ContentType: contentType },
+            partSize: Math.max(16 * 1024 ** 2, Math.ceil((await stat(path)).size / 9000)),
+            queueSize: 3,
+        });
+        const abort = () => void upload.abort();
+        signal?.throwIfAborted();
+        signal?.addEventListener('abort', abort, { once: true });
+        try {
+            await upload.done();
+        } finally {
+            signal?.removeEventListener('abort', abort);
+        }
+    }
+
+    async getText(key: string) {
+        const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+        return res.Body!.transformToString();
+    }
+
     async deletePrefix(prefix: string) {
         let deleted = 0;
         let token: string | undefined;
@@ -147,6 +194,25 @@ export class MemoryStorage implements Storage {
     }
     async signGet(key: string) {
         return `https://storage.test/${key}?signed`;
+    }
+    readonly texts = new Map<string, string>();
+    async signStable(key: string) {
+        return `https://storage.test/${key}?stable`;
+    }
+    async downloadTo(_key: string, path: string) {
+        if (this.sourceFile) await copyFile(this.sourceFile, path);
+        else await writeFile(path, 'x');
+    }
+    /** A real file for downloadTo to hand out (integration tests). */
+    sourceFile: string | null = null;
+    async putFile(key: string, path: string) {
+        this.objects.set(key, (await stat(path)).size);
+        if (key.endsWith('.m3u8')) this.texts.set(key, await readFile(path, 'utf8'));
+    }
+    async getText(key: string) {
+        const text = this.texts.get(key);
+        if (text === undefined) throw new Error('NoSuchKey');
+        return text;
     }
     async deletePrefix(prefix: string) {
         let n = 0;

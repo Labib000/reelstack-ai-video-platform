@@ -8,6 +8,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      // The light build: no subtitles, DRM or alternate audio, which we don't use.
+      'hls.js': 'hls.js/light',
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
@@ -25,6 +27,8 @@ export default defineConfig({
         // deploys, so browsers keep them cached (pattern from Hisaab-mern).
         codeSplitting: {
           groups: [
+            // Only the watch page loads this one.
+            { name: 'hls', test: /node_modules[\\/]hls\.js[\\/]/ },
             { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
             { name: 'router', test: /node_modules[\\/](react-router|react-router-dom)[\\/]/ },
             { name: 'motion', test: /node_modules[\\/](motion|motion-dom|motion-utils|framer-motion)[\\/]/ },

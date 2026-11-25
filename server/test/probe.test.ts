@@ -20,7 +20,15 @@ describe('evaluateProbe', () => {
             width: 1920,
             height: 1080,
             videoCodec: 'h264',
+            hasAudio: false,
         });
+    });
+
+    it('skips cover art and swaps sides for rotated phone video', () => {
+        const cover = { ...stream, width: 600, height: 600, disposition: { attached_pic: 1 } };
+        const rotated = { ...stream, side_data_list: [{ rotation: -90 }] };
+        expect(evaluateProbe({ streams: [cover, rotated, { codec_type: 'audio' }], format: { duration: '9' } })).toMatchObject({ width: 1080, height: 1920, hasAudio: true });
+        expect(evaluateProbe({ streams: [cover], format: { duration: '9' } }).ok).toBe(false);
     });
 
     it('rejects files without a video stream, unreadable files and bad lengths', () => {

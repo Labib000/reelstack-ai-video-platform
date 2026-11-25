@@ -57,6 +57,10 @@ const envSchema = z.object({
         (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
         z.coerce.number().int().positive().default(5 * 1024 ** 3),
     ),
+    /** Worker scratch space (default: .transcode/ in the repo). */
+    TRANSCODE_DIR: optionalString,
+    /** Signs playback tokens; derived from JWT_ACCESS_SECRET when unset. */
+    PLAYBACK_TOKEN_SECRET: optionalString.refine((s) => s === undefined || s.length >= 32, 'PLAYBACK_TOKEN_SECRET must be at least 32 characters'),
 
     GROQ_API_KEY: optionalString,
 });

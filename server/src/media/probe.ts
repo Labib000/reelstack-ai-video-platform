@@ -15,25 +15,44 @@ const run = promisify(execFile);
 
 export const PROBE_LIMITS = { minSec: 1, maxSec: 6 * 3600 } as const;
 
+interface FfprobeStream {
+    codec_type?: string;
+    codec_name?: string;
+    width?: number;
+    height?: number;
+    duration?: string;
+    disposition?: { attached_pic?: number };
+    side_data_list?: { rotation?: number }[];
+}
 interface FfprobeOutput {
-    streams?: { codec_type?: string; codec_name?: string; width?: number; height?: number; duration?: string }[];
+    streams?: FfprobeStream[];
     format?: { duration?: string };
 }
 
 export type ProbeVerdict =
-    | { ok: true; durationSec: number; width: number; height: number; videoCodec: string | null }
+    | { ok: true; durationSec: number; width: number; height: number; videoCodec: string | null; hasAudio: boolean }
     | { ok: false; error: string };
 
 /** Pure: turn ffprobe's JSON into a verdict (unit-tested without ffprobe). */
 export function evaluateProbe(output: FfprobeOutput | null): ProbeVerdict {
-    const video = output?.streams?.find((s) => s.codec_type === 'video' && s.width && s.height);
+    const video = output?.streams?.find((s) => s.codec_type === 'video' && s.width && s.height && !s.disposition?.attached_pic);
     if (!output || !video) return { ok: false, error: 'This file isn’t a playable video.' };
     const duration = Number(output.format?.duration ?? video.duration);
     if (!Number.isFinite(duration) || duration < PROBE_LIMITS.minSec) {
         return { ok: false, error: 'This video is too short (or its length can’t be read).' };
     }
     if (duration > PROBE_LIMITS.maxSec) return { ok: false, error: 'Videos can be up to 6 hours long.' };
-    return { ok: true, durationSec: Math.round(duration), width: video.width!, height: video.height!, videoCodec: video.codec_name ?? null };
+    // Phones store portrait video sideways plus a rotation flag.
+    const rotation = video.side_data_list?.find((d) => d.rotation !== undefined)?.rotation ?? 0;
+    const sideways = Math.abs(rotation) % 180 === 90;
+    return {
+        ok: true,
+        durationSec: Math.round(duration),
+        width: sideways ? video.height! : video.width!,
+        height: sideways ? video.width! : video.height!,
+        videoCodec: video.codec_name ?? null,
+        hasAudio: output.streams!.some((s) => s.codec_type === 'audio'),
+    };
 }
 
 export type Ffprobe = (url: string) => Promise<FfprobeOutput | null>;
@@ -42,10 +61,12 @@ export type Ffprobe = (url: string) => Promise<FfprobeOutput | null>;
  * Uploads are untrusted. Playlist formats (HLS, DASH, concat) can point ffprobe
  * at other URLs or local files, so only plain containers over HTTP are allowed.
  */
+export const CONTAINER_WHITELIST = 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi';
+
 export const ffprobeArgs = (url: string) => [
     '-v', 'error',
     '-protocol_whitelist', 'http,https,tcp,tls',
-    '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi',
+    '-format_whitelist', CONTAINER_WHITELIST,
     '-print_format', 'json',
     '-show_format',
     '-show_streams',
@@ -68,7 +89,7 @@ export const ffprobe: Ffprobe = async (url) => {
     }
 };
 
-/** Probe one video and record the result. Leaves status `processing` on success (transcode is Phase 3). */
+/** Probe one video and record the result. Leaves status `processing` on success: transcoding is next. */
 export async function probeVideo(videoId: string, storage: Storage, logger: Logger, probe: Ffprobe = ffprobe): Promise<ProbeVerdict | null> {
     const video = await Video.findById(videoId).lean();
     if (!video || video.status !== 'processing') return null; // deleted or already handled
@@ -116,5 +137,15 @@ export async function markProbeGaveUp(videoId: string): Promise<void> {
 export async function requeueLostProbes(jobs: Jobs, minAgeMs = 30 * 60_000): Promise<number> {
     const lost = await Video.find({ status: 'processing', processedAt: null, updatedAt: { $lt: new Date(Date.now() - minAgeMs) } }, '_id').lean();
     for (const v of lost) await jobs.enqueueProbe(v._id.toString());
+    return lost.length;
+}
+
+/** Same for transcodes: checked, but nothing has moved for a while. Progress keeps `updatedAt` fresh. */
+export async function requeueLostTranscodes(jobs: Jobs, minAgeMs = 30 * 60_000): Promise<number> {
+    const lost = await Video.find({ status: 'processing', processedAt: { $ne: null }, updatedAt: { $lt: new Date(Date.now() - minAgeMs) } }, '_id').lean();
+    for (const v of lost) {
+        await jobs.enqueueTranscode(v._id.toString());
+        await Video.updateOne({ _id: v._id }, { $set: { updatedAt: new Date() } }); // don't queue it again next hour
+    }
     return lost.length;
 }

@@ -104,7 +104,7 @@ export function createVideosRouter(config: Config, logger: Logger, storage: Stor
         logger.info({ videoId: _id.toString(), sizeBytes: input.sizeBytes }, 'Upload started');
 
         const body: UploadSessionDTO = {
-            video: toOwnVideoDTO(video.toObject()),
+            video: await toOwnVideoDTO(video.toObject(), storage),
             partSize,
             partCount: Math.ceil(input.sizeBytes / partSize),
         };
@@ -197,7 +197,7 @@ export function createVideosRouter(config: Config, logger: Logger, storage: Stor
             logger.error({ err: error, videoId: video._id.toString() }, 'Could not queue the probe');
         }
         logger.info({ videoId: video._id.toString() }, 'Upload complete');
-        res.json({ video: toOwnVideoDTO(updated) });
+        res.json({ video: await toOwnVideoDTO(updated, storage) });
     });
 
     /** Cancel an upload in progress: abort it in storage and forget the video. */
@@ -215,13 +215,13 @@ export function createVideosRouter(config: Config, logger: Logger, storage: Stor
 
     router.get('/mine', async (req, res) => {
         const videos = await Video.find({ owner: new Types.ObjectId(req.user!.id) }).sort({ createdAt: -1 }).limit(200).lean();
-        res.json({ videos: videos.map(toOwnVideoDTO) });
+        res.json({ videos: await Promise.all(videos.map((v) => toOwnVideoDTO(v, storage))) });
     });
 
     router.get('/:id', async (req, res) => {
         const video = await ownVideo(req, res, { moderators: true });
         if (!video) return;
-        res.json({ video: toOwnVideoDTO(video) });
+        res.json({ video: await toOwnVideoDTO(video, storage) });
     });
 
     router.patch('/:id', async (req, res) => {
@@ -230,7 +230,7 @@ export function createVideosRouter(config: Config, logger: Logger, storage: Stor
         const video = await ownVideo(req, res);
         if (!video) return;
         const updated = await Video.findByIdAndUpdate(video._id, { $set: input }, { returnDocument: 'after' }).lean();
-        res.json({ video: toOwnVideoDTO(updated!) });
+        res.json({ video: await toOwnVideoDTO(updated!, storage) });
     });
 
     /** Delete for good: the open upload, the source file and any renditions. */

@@ -1,17 +1,18 @@
 /**
  * Background jobs on Redis (BullMQ). The API only enqueues; `src/worker.ts`
- * runs them. Phase 2 has `probe` (check the upload is a real video) and
- * `cleanup` (abort abandoned uploads); Phase 3 adds `transcode`.
+ * runs them: `probe` (is it a real video?), `transcode` (make HLS) and
+ * `cleanup`. Transcodes have their own queue, so a long one never delays checks.
  */
 import { Queue } from 'bullmq';
 
 import type { Logger } from './logger.js';
 
 export const MEDIA_QUEUE = 'media';
-export type MediaJob = { name: 'probe'; data: { videoId: string } } | { name: 'cleanup'; data: Record<string, never> };
+export const TRANSCODE_QUEUE = 'transcode';
 
 export interface Jobs {
     enqueueProbe(videoId: string): Promise<void>;
+    enqueueTranscode(videoId: string): Promise<void>;
     close(): Promise<void>;
 }
 
@@ -30,6 +31,7 @@ export function redisConnection(url: string) {
 
 export class BullJobs implements Jobs {
     private readonly queue: Queue;
+    private readonly transcodes: Queue;
 
     constructor(redisUrl: string) {
         this.queue = new Queue(MEDIA_QUEUE, {
@@ -41,6 +43,19 @@ export class BullJobs implements Jobs {
                 removeOnFail: { count: 1000 },
             },
         });
+        this.transcodes = new Queue(TRANSCODE_QUEUE, {
+            connection: redisConnection(redisUrl),
+            defaultJobOptions: {
+                attempts: 2,
+                backoff: { type: 'fixed', delay: 30_000 },
+                removeOnComplete: { count: 500 },
+                removeOnFail: { count: 1000 },
+            },
+        });
+    }
+
+    async enqueueTranscode(videoId: string) {
+        await this.transcodes.add('transcode', { videoId });
     }
 
     async enqueueProbe(videoId: string) {
@@ -53,8 +68,8 @@ export class BullJobs implements Jobs {
         await this.queue.upsertJobScheduler('cleanup-hourly', { every: 3_600_000 }, { name: 'cleanup', data: {} });
     }
 
-    close() {
-        return this.queue.close();
+    async close() {
+        await Promise.all([this.queue.close(), this.transcodes.close()]);
     }
 }
 
@@ -64,12 +79,19 @@ export class NoJobs implements Jobs {
     async enqueueProbe(videoId: string) {
         this.logger?.warn({ videoId }, 'REDIS_URL not set: probe job not queued');
     }
+    async enqueueTranscode(videoId: string) {
+        this.logger?.warn({ videoId }, 'REDIS_URL not set: transcode job not queued');
+    }
     async close() {}
 }
 
 /** Tests: records what would have been queued. */
 export class MemoryJobs implements Jobs {
     readonly probes: string[] = [];
+    readonly transcodes: string[] = [];
+    async enqueueTranscode(videoId: string) {
+        this.transcodes.push(videoId);
+    }
     async enqueueProbe(videoId: string) {
         this.probes.push(videoId);
     }

@@ -61,3 +61,13 @@ export function requireAuth(
         next();
     };
 }
+
+/**
+ * For routes that also work signed out. No header: continue anonymously. A bad
+ * or expired token is still a 401, so the client refreshes instead of silently
+ * being treated as a stranger.
+ */
+export function optionalAuth(config: Pick<Config, 'JWT_ACCESS_SECRET'>): RequestHandler {
+    const required = requireAuth(config);
+    return (req, res, next) => (req.get('authorization') ? required(req, res, next) : next());
+}

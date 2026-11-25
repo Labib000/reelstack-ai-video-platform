@@ -80,14 +80,18 @@ A long-form video platform built with the MERN stack and TypeScript. It has adap
   - on completion the API checks the stored size against what the client claimed, then queues a job (a mismatch marks the video failed and deletes the file)
   - quotas: 5 GB per file, 3 uploads in progress and 10 a day per user
 - **Background worker (BullMQ):** a separate process runs **ffprobe** on each upload over a presigned URL (no full download), rejects files that aren't real videos with a plain-language reason (playlist formats and non-HTTP protocols are blocked, so an upload can't make the worker fetch other URLs), retries when storage is down, records duration, resolution and codec, and sweeps uploads abandoned for 24 hours.
-- **Your videos:** live status (Uploading → Checking file → Waiting to transcode), edit title, description and visibility, delete (removes the files from storage too).
+- **Transcoding to adaptive HLS:** FFmpeg makes 360p / 720p / 1080p (by the short side, never upscaled; portrait works) plus a thumbnail.
+  - one fMP4 file per quality with byte ranges, so a single signed URL protects it
+  - live progress, retries, stall detection, a disk check, and a conditional publish: a retry, deletion or worker restart never leaves half a video behind
+- **Protected playback:** the API checks visibility on every playlist request and points the player at short-lived signed storage URLs. Playlists use a token scoped to one video (Safari's native HLS can't send headers). Links last up to 12 hours, so someone already watching keeps access until theirs runs out.
+- **Player:** hls.js (or native HLS) with a quality menu, seek, volume, fullscreen, keyboard shortcuts, and automatic renewal of expired links.
+- **Your videos:** live status (Uploading → Checking file → Transcoding 43% → Ready), edit title, description and visibility, delete (removes the files from storage too).
 - **Account suspension that takes effect immediately:** login, token refresh and every authenticated request refuse a suspended account, and all its sessions are revoked.
 - **Health endpoint** reporting MongoDB and Redis status.
 
-> The browse catalogue (home, explore, watch), transcripts and Ask answers still come from a typed placeholder data layer (`client/src/data/`) until uploaded videos can be played (Phase 3–4). Uploads, Your videos and the admin console use the real API.
+> The browse catalogue (home, explore, watch), transcripts and Ask answers still come from a typed placeholder data layer (`client/src/data/`) until Phase 4–5. Uploads, playback of uploads, Your videos and the admin console use the real API.
 
 ### In progress / planned
-- **FFmpeg** transcode in the worker: a 360p/720p/1080p HLS ladder plus a thumbnail
 - **Groq Whisper** transcription, then embeddings, then **RAG with timestamp citations**
 - **Prometheus + Grafana** monitoring with a provisioned dashboard
 - GitHub Actions CI and a production deploy
@@ -107,7 +111,7 @@ See the [Roadmap](#roadmap) for details.
 | **Cache / limits / queue** | Redis 7 via ioredis (rate limits) and **BullMQ** (media jobs) |
 | **Storage** | S3 API via `@aws-sdk/client-s3`: multipart uploads with presigned part URLs (RustFS locally, Cloudflare R2 in prod) |
 | **Object storage** | RustFS locally (S3-compatible), Cloudflare R2 in production |
-| **Media** | ffprobe file checks today; FFmpeg → adaptive HLS with hls.js next |
+| **Media** | ffprobe file checks, FFmpeg → adaptive HLS (fMP4), hls.js |
 | **AI** *(planned)* | Groq Whisper (transcripts), local bge-small embeddings, Groq LLM for answers |
 | **Monitoring** *(planned)* | prom-client → Prometheus → Grafana |
 | **Testing** | Vitest, Supertest, mongodb-memory-server |
@@ -135,13 +139,14 @@ flowchart LR
     API --> MONGO[("MongoDB<br/>users, sessions, videos,<br/>audit log")]
     API --> REDIS[("Redis<br/>rate limits · BullMQ")]
     API -- "create / complete<br/>multipart" --> S3
-    REDIS --> W["Worker<br/>ffprobe check · cleanup"]
-    W -- "presigned GET" --> S3
+    REDIS --> W["Worker<br/>ffprobe · FFmpeg HLS · cleanup"]
+    W -- "source in, HLS out" --> S3
+    UI -- "signed HLS byte ranges" --> S3
     W --> MONGO
 
     subgraph Planned
         direction TB
-        T["FFmpeg HLS · Whisper · embeddings"]
+        T["Whisper · embeddings"]
         PROM["Prometheus"] --> GRAF["Grafana"]
     end
 
@@ -176,6 +181,9 @@ sequenceDiagram
     Q->>W: probe
     W->>S: ffprobe over a presigned GET
     W->>W: video stream? 1 s – 6 h? save duration, resolution
+    W->>Q: transcode job
+    W->>S: HLS + thumbnail to hls/{id}/{run}/
+    W->>W: publish: status ready
 ```
 
 ---
@@ -258,6 +266,8 @@ npm run user:role -- you@example.com admin     # user | moderator | admin
 
 ---
 
+> The worker needs **FFmpeg and ffprobe** on your PATH (`sudo apt install ffmpeg`).
+
 ## Local infrastructure (Docker)
 
 Everything runs from `docker-compose.yml`. All ports bind to `127.0.0.1` only, and data lives in named volumes, so it survives `infra:down`.
@@ -316,6 +326,8 @@ From `.env.example`. Never commit `.env`.
 | `S3_BUCKET` | `reelstack` | Created by `storage-init` |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | `rustfsadmin` | Also the RustFS console login |
 | `S3_PUBLIC_ENDPOINT` | *(empty → `S3_ENDPOINT`)* | The storage URL browsers reach; presigned URLs are signed for it |
+| `TRANSCODE_DIR` | *(empty → `.transcode/`)* | Worker scratch space; needs real disk, not a RAM-backed `/tmp` |
+| `PLAYBACK_TOKEN_SECRET` | *(empty → derived)* | Signs playback links; derived from `JWT_ACCESS_SECRET` when blank |
 | `UPLOAD_MAX_BYTES` | *(empty → 5 GB)* | Largest file the API accepts |
 | `GROQ_API_KEY` | *(empty)* | Whisper and the LLM for Ask the Video (planned) |
 | `MONGO_EXPRESS_USER` / `MONGO_EXPRESS_PASSWORD` | `admin` / `reelstack` | mongo-express basic auth |
@@ -370,9 +382,11 @@ All routes are under `/api`. Errors use one shape, `{ message, errors? }`; valid
 | `DELETE` | `/videos/:id/upload` | Bearer (owner) | Cancel an upload in progress |
 | `GET` | `/videos/mine` | Bearer | Your videos with their status |
 | `GET` / `PATCH` / `DELETE` | `/videos/:id` | Bearer (owner; moderators can `GET`) | One video; edit details; delete it and its files |
+| `GET` | `/videos/:id/watch` | optional Bearer | Player data and a tokenised playlist URL. 404 if not ready or not allowed |
+| `GET` | `/playback/:id/master.m3u8` · `/:height.m3u8` | `?token=` | HLS playlists; media URLs are signed |
 | `GET` | `/admin/videos?q=&status=&page=` | Bearer + `moderation:view` | Every upload, with owner |
 | `POST` | `/admin/videos/:id/remove` · `/restore` | Bearer + `video:moderate` | Take down with a reason / put back (audited) |
-| `POST` | `/admin/videos/:id/reprocess` | Bearer + `video:moderate` | Re-run a failed file check (audited) |
+| `POST` | `/admin/videos/:id/reprocess` | Bearer + `video:moderate` | Process a failed video again (audited) |
 
 | Permission | Moderator | Admin |
 |---|:-:|:-:|
@@ -395,9 +409,9 @@ reelstack/
 │   │   ├── auth/           tokens, refresh rotation, cookies, argon2
 │   │   ├── middleware/     requireAuth, requirePermission, CSRF, rate limits, validation
 │   │   ├── models/         User, RefreshToken, RateLimit, AuditLog, Video
-│   │   ├── routes/         auth, admin, videos, health
+│   │   ├── routes/         auth, admin, videos, playback, health
 │   │   ├── lib/            logger (pino), redis, rate-limit store, storage (S3), queue (BullMQ)
-│   │   ├── media/          probe: ffprobe check + stale-upload cleanup
+│   │   ├── media/          probe, ladder, ffmpeg, transcode
 │   │   ├── worker.ts       the BullMQ worker process
 │   │   └── cli/            setRole, seedDemo
 │   └── test/               Vitest + Supertest (in-memory MongoDB)
@@ -434,6 +448,8 @@ npm run test -w client         # client: refresh handling, forms, password scori
   - the admin API: the stats shape, the permission matrix, user search and pagination, suspension (login, access token and refresh all refused), audit entries
   - uploads, against in-memory storage and queue fakes: type and size checks, both quotas, owner-only access, missing parts, a size mismatch, cancel, edit and delete
   - video moderation: remove, restore and reprocess, with audit entries
+  - transcoding with a fake FFmpeg (success, retry, deletion, supersede, shutdown) and, if installed, a real one
+  - playback: the access matrix, token scope and expiry, takedowns and suspensions
   - the worker's file check (valid, no video stream, too short, too long) and the stale-upload sweep
 - Client tests cover the upload engine with a fake `PUT`: the part plan, URL batching, retry then success, giving up, and cancel.
 
@@ -448,8 +464,8 @@ npm run test -w client         # client: refresh handling, forms, password scori
 | — | Client UI: shell, home, watch, library, auth screens | ✅ Done (placeholder data) |
 | — | Admin console: dashboard, users, suspensions, audit log, video moderation, demo seed | ✅ Done (reports on demo data) |
 | 2 | Upload pipeline: S3 multipart direct to RustFS / R2 with presigned URLs, quotas, BullMQ worker with an ffprobe check, Your videos | ✅ Done |
-| 3 | **Transcode:** FFmpeg → 360p/720p/1080p HLS plus a thumbnail in the worker, with retries and backoff | ⏳ Next |
-| 4 | Player (hls.js), comments, likes, subscriptions on the real API | 🗓 Planned |
+| 3 | **Transcode and playback:** FFmpeg → 360p/720p/1080p HLS plus a thumbnail, protected playback, hls.js player | ✅ Done |
+| 4 | Real catalogue: home, search, channels, comments, likes, subscriptions on the API | ⏳ Next |
 | 5 | **Ask the Video:** Whisper transcripts → embeddings → hybrid retrieval → cited answers; moment search | 🗓 Planned |
 | 6 | **Prometheus + Grafana**, k6 load tests, GitHub Actions CI, deploy (API + worker on Render/Fly, client on Vercel, R2, Atlas, managed Redis) | 🗓 Planned |
 

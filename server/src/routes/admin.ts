@@ -273,7 +273,7 @@ export function createAdminRouter(config: Config, logger: Logger, storage: Stora
             Video.countDocuments(filter),
         ]);
         const body: Page<AdminVideoDTO> = {
-            items: videos.map((v) => toAdminVideoDTO(v as unknown as Parameters<typeof toAdminVideoDTO>[0])),
+            items: await Promise.all(videos.map((v) => toAdminVideoDTO(v as unknown as Parameters<typeof toAdminVideoDTO>[0], storage))),
             total,
             page: query.page,
             pageSize: query.pageSize,
@@ -289,7 +289,7 @@ export function createAdminRouter(config: Config, logger: Logger, storage: Stora
     }
     async function adminVideo(id: Types.ObjectId) {
         const v = await Video.findById(id).populate('owner', 'name username').lean();
-        return toAdminVideoDTO(v as unknown as Parameters<typeof toAdminVideoDTO>[0]);
+        return toAdminVideoDTO(v as unknown as Parameters<typeof toAdminVideoDTO>[0], storage);
     }
 
     /** Soft remove: hidden from everyone but the owner, who sees why. */
@@ -334,7 +334,7 @@ export function createAdminRouter(config: Config, logger: Logger, storage: Stora
             res.status(409).json({ message: 'The source file is gone, so there’s nothing to check. The owner has to upload it again.' });
             return;
         }
-        await Video.updateOne({ _id: video._id }, { $set: { status: 'processing', error: null, processedAt: null } });
+        await Video.updateOne({ _id: video._id }, { $set: { status: 'processing', error: null, processedAt: null, transcodeProgress: null, transcodeRunId: null } });
         await jobs.enqueueProbe(video._id.toString());
         await audit(req.user!.id, 'video.reprocessed', video.owner.toString(), {}, video._id.toString());
         res.json({ video: await adminVideo(video._id) });

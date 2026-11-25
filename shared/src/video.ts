@@ -133,6 +133,12 @@ export interface OwnVideoDTO {
     createdAt: string;
     /** When the file check (ffprobe) finished. */
     processedAt: string | null;
+    /** 0–100 while transcoding; null before it starts and once it's done. */
+    transcodeProgress: number | null;
+    /** Qualities available, e.g. [360, 720, 1080]. Empty until ready. */
+    renditions: number[];
+    /** Short-lived signed URL. */
+    thumbnailUrl: string | null;
     /** Taken down by a moderator. */
     removedAt: string | null;
     removedReason: string | null;
@@ -140,6 +146,26 @@ export interface OwnVideoDTO {
 
 export interface AdminVideoDTO extends OwnVideoDTO {
     owner: { id: string; name: string; username: string | null } | null;
+}
+
+/** GET /api/videos/:id/watch: everything the player page needs. */
+export interface WatchVideoDTO {
+    id: string;
+    title: string;
+    description: string;
+    visibility: Visibility;
+    durationSec: number;
+    width: number;
+    height: number;
+    views: number;
+    createdAt: string;
+    thumbnailUrl: string | null;
+    owner: { id: string; name: string; username: string | null } | null;
+    isOwner: boolean;
+    /** Set when a moderator took it down (only the owner and staff get this far). */
+    removedReason: string | null;
+    /** HLS master playlist, with a playback token for this video only. */
+    playbackUrl: string;
 }
 
 /** POST /api/videos response: where and how to send the file. */

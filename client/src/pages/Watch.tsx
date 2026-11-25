@@ -14,14 +14,21 @@ import PlayerStage from '@/components/watch/PlayerStage'
 import { getSuggestions, getTranscript, getUpNext, getVideo } from '@/data'
 import { useLibrary } from '@/hooks/use-library'
 import { formatDuration, formatViews } from '@/lib/format'
+import { isUploadId } from '@/lib/videoId'
 import { timeAgo } from '@/lib/userAgent'
 import { cn } from '@/lib/utils'
 import NotFound from './NotFound'
+import WatchUpload from './WatchUpload'
 
 const HISTORY_EVERY_SEC = 5
 
+/** Real uploads play through HLS; catalogue ids keep the placeholder player until Phase 4. */
 export default function Watch() {
   const { id = '' } = useParams()
+  return isUploadId(id) ? <WatchUpload key={id} id={id} /> : <WatchDemo id={id} />
+}
+
+function WatchDemo({ id }: { id: string }) {
   const [params] = useSearchParams()
   const lib = useLibrary()
   const [video, setVideo] = useState<VideoDetailDTO | null | undefined>(undefined)

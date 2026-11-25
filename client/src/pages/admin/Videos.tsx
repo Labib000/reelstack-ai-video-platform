@@ -1,5 +1,5 @@
 import { ADMIN_VIDEO_STATUSES, type AdminVideoDTO, can } from '@reelstack/shared'
-import { EyeOffIcon, MoreHorizontalIcon, RotateCcwIcon, SearchIcon, TriangleAlertIcon, UndoIcon, UserIcon, VideoOffIcon } from 'lucide-react'
+import { EyeOffIcon, MoreHorizontalIcon, PlayIcon, RotateCcwIcon, SearchIcon, TriangleAlertIcon, UndoIcon, UserIcon, VideoOffIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -41,6 +41,7 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'uploading', label: 'Uploading' },
   { value: 'processing', label: 'Processing' },
+  { value: 'ready', label: 'Ready' },
   { value: 'failed', label: 'Failed' },
   { value: 'removed', label: 'Removed' },
 ]
@@ -87,7 +88,7 @@ export default function Videos() {
       if (kind === 'remove') replace(await removeVideo(video.id, reason.trim()))
       else if (kind === 'restore') replace(await restoreVideo(video.id))
       else replace(await reprocessVideo(video.id))
-      toast.success({ remove: 'Video removed', restore: 'Video restored', reprocess: 'File check queued again' }[kind])
+      toast.success({ remove: 'Video removed', restore: 'Video restored', reprocess: 'Queued for processing again' }[kind])
       setPending(null)
       setReason('')
     } catch (e) {
@@ -105,7 +106,7 @@ export default function Videos() {
       action: 'Remove video',
     },
     restore: { title: `Restore “${pending?.video.title}”?`, body: 'It goes back to the owner’s chosen visibility.', action: 'Restore' },
-    reprocess: { title: 'Run the file check again?', body: 'Useful when a check failed for a temporary reason, like storage being briefly unreachable.', action: 'Reprocess' },
+    reprocess: { title: 'Process this video again?', body: 'Runs the file check and the transcode again. Useful when it failed for a temporary reason, like storage being briefly unreachable.', action: 'Reprocess' },
   }[pending?.kind ?? 'restore']
 
   return (
@@ -163,7 +164,7 @@ export default function Videos() {
             {data.items.map((v) => (
               <li key={v.id} className={cn('flex items-center gap-3 p-3 sm:gap-4', v.removedAt && 'bg-muted/30')}>
                 <div className={cn('relative w-24 shrink-0 sm:w-32', v.removedAt && 'opacity-50 grayscale')}>
-                  <Poster seed={v.id} title={v.title} showTitle={false} className="aspect-video rounded-lg" />
+                  <Poster seed={v.id} title={v.title} thumbnailUrl={v.thumbnailUrl} showTitle={false} className="aspect-video rounded-lg" />
                   {v.durationSec != null && (
                     <span className="absolute right-1 bottom-1 rounded bg-black/75 px-1 font-mono text-[10px] text-white">{formatDuration(v.durationSec)}</span>
                   )}
@@ -199,6 +200,13 @@ export default function Videos() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-48">
+                    {v.status === 'ready' && canModerate && (
+                      <DropdownMenuItem asChild>
+                        <Link to={`/watch/${v.id}`}>
+                          <PlayIcon /> Watch
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
                     {v.owner && (
                       <DropdownMenuItem asChild>
                         <Link to={`/admin/users/${v.owner.id}`}>
